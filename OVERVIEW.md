@@ -111,7 +111,12 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
 
 ## 5. 기술 스택
 
-- 언어/런타임: TypeScript 6, 브라우저 ESM, Node 22(개발·CI)
+- 언어/런타임: TypeScript 7, 브라우저 ESM, Node 22(개발·CI)
+  - TS 7의 `typescript` 패키지는 네이티브 컴파일러 래퍼라 JS 컴파일러 API를
+    노출하지 않는다(7.0.2에서 `createProgram`·`createSourceFile` 부재 실측).
+    결정 2의 경계 정적 검사를 typescript-eslint·ts-morph 위에 지을 수 없으므로
+    네이티브 린터(Biome·oxlint)나 경로 규칙 검사로 구현한다.
+    계약 문자열 검사는 파일 문자열 탐색이라 영향받지 않는다.
 - 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
   이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
 - Cesium: peer `>=1.142.0 <1.144.0` (번들에 포함하지 않음)
