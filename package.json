@@ -1,0 +1,29 @@
+{
+  "name": "copc-tileset-provider",
+  "version": "0.0.0",
+  "description": "Stream static COPC point clouds into CesiumJS with no pre-tiling step.",
+  "license": "MIT",
+  "author": "Kunyoung Park",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "copc": "^0.0.9",
+    "laz-perf": "^0.0.7",
+    "proj4": "^2.21.0"
+  },
+  "peerDependencies": {
+    "cesium": ">=1.142.0 <1.144.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

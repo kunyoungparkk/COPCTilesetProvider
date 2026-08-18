@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    // Browser ESM (OVERVIEW §5). The WebWorker lib is deliberately absent:
+    // it collides with DOM in one program, so src/worker/ gets its own
+    // config when the worker bundle lands.
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    // Point buffers are indexed on every hot path; unchecked reads would
+    // hide exactly the out-of-range bugs that matter here.
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Rollup and Vitest strip types rather than compile them, so every
+    // construct we write has to survive plain erasure.
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+
+    // Required, not cosmetic: laz-perf and copc reference @types/emscripten
+    // and proj4 references geotiff, none of which we depend on.
+    "skipLibCheck": true,
+
+    // No build yet — Rollup arrives with the first source files.
+    "noEmit": true
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}
