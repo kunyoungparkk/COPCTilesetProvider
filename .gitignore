@@ -1,0 +1,26 @@
+# Dependencies / build
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Packaging (tarball smoke output stays local)
+*.tgz
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Local datasets — full COPC files are cut into fixtures/, never committed whole
+data/
+*.laz
+
+# Claude Code local overlays
+CLAUDE.local.md
+.claude/settings.local.json
+
+# OS / editor / logs
+.DS_Store
+*.log
+.env

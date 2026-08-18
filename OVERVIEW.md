@@ -1,0 +1,152 @@
+# COPCTilesetProvider — 프로젝트 개요
+
+## 1. 한 줄 정의
+
+정적 COPC 파일을 **사전 변환 없이** CesiumJS 지구본에 스트리밍 가시화하는 TypeScript 오픈소스 라이브러리.
+`COPCTilesetProvider.fromUrl(url)` 한 줄로 로드한다.
+
+## 2. 왜 만드는가 (기획 배경)
+
+- 대용량 Point Cloud를 웹에 올리려면 3D Tiles 사전 타일링이 필수였다.
+  → 변환 시간·스토리지 이중화·파이프라인 운영 비용이 크다.
+- COPC는 파일 내부가 Octree/LoD로 정렬된 "스트리밍 가능한 LAZ"다.
+  HTTP Range만 지원하는 정적 서버(S3, nginx)면 필요한 조각만 읽을 수 있다.
+- 그런데 CesiumJS에는 COPC를 직접 읽는 수단이 없다. 이 간극을 잇는 "어댑터"가 본 프로젝트다.
+
+## 3. 핵심 설계 결정 (기술 전략)
+
+**결정 1 — 렌더러를 새로 만들지 않는다.**
+Cesium3DTileset이 이미 최고 수준의 traversal·LoD·요청 우선순위·캐시·스타일·picking을 갖고 있다.
+우리는 COPC 구조를 "합성 3D Tiles"로 실시간 매핑해 이 엔진을 그대로 빌려 쓴다.
+자체 Octree 순회·요청 큐·GPU LRU 금지.
+
+**결정 2 — Cesium의 `_runtimeContentCodec` 확장점을 주 경로로 쓴다.**
+Cesium이 타일 bytes를 받은 뒤 콘텐츠 생성을 위임하는 내부 슬롯으로,
+first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므로:
+
+- 모든 내부 접근을 `src/cesium-runtime/` 한 곳에 격리 (정적 검사로 강제)
+- 지원 버전을 검증된 1.142.0~1.143.x로 제한 (peer dependency)
+- 경계 규칙: source는 Cesium을 모른다. cesium-runtime 밖에서 underscore
+  필드·factory 접근 시 정적 검사가 빌드를 실패시킨다.
+- 검증 현황: 슬롯 존재는 1.142·1.143에서 확인 완료(Gate 0). 동일 과제 출품작은 이 슬롯을 missingTilePolicy(빈 타일 처리)에만 썼고, `createContent`로 콘텐츠 전체를 공급한 사례는 아직 없다.
+  **남은 미지수는 createContent가 반환해야하는 객체의 정확한 계약**이며, hard gate가 이것을 검증한다.
+- 회귀 가드: 설치된 Cesium 소스에서 계약 문자열(예: `this._runtimeContentCodec = undefined`)의 존재를 확인하는 오프라인 정적 검사를 CI에 둔다.
+  브라우저 없이, Cesium 버전이 바뀌어 이 결합이 깨지는 순간을 잡기 위함이다.
+
+**결정 3 — 무거운 일은 전부 Web Worker에서.**
+LAZ 압축 해제(laz-perf WASM)·좌표 변환·PNTS 인코딩을 Worker에서 수행, 메인 스레드는 조율만 한다.
+압축 입력과 PNTS 출력만 Transferable로 이동.
+
+**결정 4 — 전송은 검증된 Range만. 왕복 수는 병합으로 줄인다.**
+모든 원격 읽기는 정확한 206 + Content-Range 검증. 200 전체 파일 fallback을 제공하지 않는다(제공하면 "스트리밍" 목표 자체가 무너짐).
+
+- 첫 요청은 bytes 0-588. COPC는 info VLR을 offset 375에 고정하므로
+  헤더와 함께 한 요청으로 읽는다. headerSize ≠ 375면 즉시 실패.
+- 이후 모든 요청은 직전 응답이 알려준 위치·크기를 근거로만 만든다. 추측성
+  선읽기(prefetch) 금지.
+- 단, **같은 시점에 승인된 여러 노드의 chunk가 파일 안에서 인접해 있으면 하나의 Range로 병합(coalescing)해 읽는다.**
+  이유: Range 요청은 건당 왕복 지연(TTFB)이 고정비라, 노드당 1요청 구조는 "요청 수 × 지연"이라는 속도 바닥이 생긴다. 상용 구현(Eptium)도 인접 노드를 병합해 읽는다.
+- 병합 허용 조건: chunk 사이 빈틈(gap)이 임계값 이내, 그리고 빈틈으로 낭비되는
+  바이트가 병합 구간의 상한 비율 이내일 때만. (초기값은 §7 튜닝 노브.)
+  병합해도 응답 검증은 동일하며, 수신 버퍼는 노드별로 분할해 각각의 descriptor에 전달한다.
+- cross-origin 소스는 서버가 `Access-Control-Expose-Headers: Content-Range`를
+  보내지 않으면 브라우저에서 이 헤더를 읽을 수 없어 검증 자체가 불가능하다.
+  이 설정은 서버 몫이라 라이브러리가 고칠 수 없다 — 우리 몫은 진단이다.
+  재시도하지 않고, 서버 설정 방법을 안내하는 typed error로 즉시 실패한다.
+
+**결정 5 — 자원은 예산·lease로 관리하고 정확히 한 번 정리한다.**
+Range body·decode·hierarchy 각각 상한 예산을 두고(초기값은 §7), 승인은
+admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3분법.
+모든 예약은 성공·실패·취소·destroy 어느 경로로 끝나든 한 번만 반환.
+
+**결정 6 — 합성 tileset·인코딩 규약.**
+합성 3D Tiles JSON과 PNTS를 만들 때의 규약. 각 항목의 근거는 COPC 구조의 논리적 귀결이거나, 동일 과제 선행 구현이 프로덕션으로 검증한 선택이다.
+
+- **refine = ADD.** COPC 노드는 중복 없는 샘플이라, 어느 볼륨의 전체 해상도는
+  루트부터 그 노드까지 경로의 합집합이다. ADD가 이 의미론과 일치한다.
+  REPLACE는 자식마다 조상 점을 다시 담아 인코딩해야 해 기각.
+  (체크포인트: 언로드·캐시 거동이 이상하면 이 선택과의 상호작용이 첫 용의자)
+- **geometricError = 루트의 실측 미터 span / N, 깊이마다 절반.** span은
+  수평·수직 중 큰 쪽 — 수직으로 긴 데이터에서 세분이 멎지 않게. (N 초기값은 §7)
+- **좌표 = 타일별 RTC_CENTER + float32 상대좌표.** ECEF 절대좌표(~6.4×10⁶ m)는
+  float32 정밀도가 ~0.5m라 카메라 이동 시 지터가 생긴다. 타일 기준점(RTC_CENTER)
+  상대값으로 저장하면 float32로도 mm 이하 정밀도 — 충분하다.
+  (uint16 양자화는 §7의 보류 항목 — 전송량과 무관한 GPU 메모리 최적화)
+- **콘텐츠 포맷 = PNTS(3D Tiles 1.0) + batch table.** 채택 근거: Worker에서
+  손 인코딩이 단순하고(헤더 + feature table + 바이너리), batch table로 LAS 속성을
+  노출하면 Cesium 스타일 언어와 피킹이 그대로 작동한다(피킹에는 BATCH_ID 필수).
+  3D Tiles 1.1 기준 legacy임을 README에 이 근거와 함께 명시. glTF 전환은 v1 이후 로드맵.
+- **빈 노드 불변식.** pointCount=0인 hierarchy 엔트리는 합성 JSON에서 content
+  자체를 생략한다. 0점 PNTS는 어떤 경로로도 서빙 금지 — 0점 PNTS를 받은 타일은
+  ready에 도달하지 못해 tilesLoaded가 영구 대기한다.
+  우리 구조에선 분류 필터가 GPU 스타일 단계라 0점 디코드 자체가 나올 수 없다.
+  나오면 정책 문제가 아니라 버그이므로 typed error로 시끄럽게 실패한다.
+- **CRS = 내부 Map으로 관리. 기본 등록은 EPSG:4326 하나.** 파일 WKT에서 EPSG AUTHORITY 코드만 추출해 CRS Map에서 찾고, 변환에는 CRS Map의 proj4 정의를 쓴다.
+  WKT 전문을 proj4에 직접 먹이지 않는다(compound CRS·방언에서 조용히 틀리는 경로).
+  - 확장: `registerCrs(code, proj4정의)` 정적 메서드. 등록된 정의의 정확성은
+    등록자 책임. 어떤 좌표계가 들어올지 예측할 수 없으므로 부분적 기본 등록
+    대신 규칙 하나로 통일한다 — "4326이 아니면 등록".
+  - 미등록 코드·코드 추출 실패는 typed error로 거부한다. 에러는 API의 일부다:
+    파일에서 추출한 코드와, 그 코드를 끼운 복사-실행 가능한 registerCrs
+    호출문을 포함할 것. (추출 실패 시엔 파일 재작성을 안내)
+  - 데모·README의 첫 예제는 registerCrs → fromUrl 순서로 작성해 이 규칙
+    자체를 문서화한다. 변환 정확성 테스트는 등록 정의 → 4326 → ECEF
+    파이프라인을 기준점 좌표의 PDAL 정답과 대조하는 방식으로 고정한다. (Autzen의 코드·정의는 WKT 실측으로 확정)
+
+## 4. 데이터 흐름 (런타임)
+
+```
+사용자: fromUrl(url) ─ metadata·root hierarchy만 Range로 읽음
+  → COPC Octree를 합성 3D Tiles JSON으로 변환 (Blob URL, 즉시 revoke)
+  → Cesium3DTileset 생성 + codec 설치, scene.primitives에 추가
+
+프레임마다: Cesium traversal이 필요한 타일 선택
+  → 타일의 가상 URI(opaque token) → ScheduledRangeResource가 가로챔
+  → registry에서 descriptor 조회 → 예산 승인 → Range fetch(206, 인접 chunk는 병합)
+  → 받은 ArrayBuffer가 그대로 codec.createContent(...)로 전달됨
+     · point 타일: Worker에서 LAZ→ECEF→PNTS → Cesium point content
+     · hierarchy 타일: page 파싱 → external tileset으로 지연 확장
+  → 이후 표시·캐시·언로드·스타일·picking은 전부 Cesium 소유
+```
+
+## 5. 기술 스택
+
+- 언어/런타임: TypeScript 6, 브라우저 ESM, Node 22(개발·CI)
+- 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
+  이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
+- Cesium: peer `>=1.142.0 <1.144.0` (번들에 포함하지 않음)
+- 빌드: Rollup(라이브러리+자체완결 Worker 번들), Vite(데모·테스트 앱)
+- 검증: Vitest(단위) · Playwright(브라우저 E2E) · 로컬 Range 서버(관측) · GitHub Actions CI
+- 출시 절차(publish 직전 1회): `npm pack` → 빈 프로젝트에 tarball 설치 →
+  패키지 이름으로 import + `fromUrl` 스모크 1회. 소스 경로에선 절대 안 깨지고
+  배포물에서만 깨지는 결함(Worker 번들·WASM 파일 누락, exports 맵 오류)을 잡는
+  유일한 지점이다. `npm link`로 대체 금지 — 링크는 이 결함들을 전부 통과시킨다.
+- 라이선스: MIT (서드파티 고지 별도 관리)
+
+## 6. 범위 밖 (v1 비목표)
+
+- COPC 생성·편집, 일반 LAS/LAZ 지원
+- 백엔드·Service Worker·영구 변환 산출물
+- 정확한 전역 point budget
+- 정표고(geoid) 보정 — 높이는 타원체고(HAE)로 취급하고 이 한계를 README에 명시한다.
+  정표고 기반 데이터는 수직 오프셋이 보일 수 있다. (선행 구현들과 동일한 범위 설정)
+- Cesium 1.141 이하, WebGL1, 2D/Columbus View
+
+## 7. 튜닝 노브 — 초기값과 개선 여지
+
+방향 결정은 §3에서 끝났다. 여기 항목들은 **값만 열려 있다**: 아래 초기값으로
+구현을 시작하고, 조정은 고정 환경(동일 viewport·network·camera path)의 측정으로만
+한다. 감각적 조정 금지. 값을 바꾸면 이 표를 갱신한다.
+
+| 노브 | 초기값 | 유래 · 조정 방향 |
+|---|---|---|
+| Range 병합 gap 임계 | 256KB | 선행 실측(타 데이터셋) 유래. 관측 Range 서버가 기록하는 요청 수·전송량으로 재측정 |
+| Range 병합 낭비 상한 | 2% | 위와 한 쌍. 실제 낭비율은 통계로 항상 노출 |
+| geometricError 루트 상수 N | 16 | 키우면 로드량↓ 화질↓. maximumScreenSpaceError와 한 쌍으로 튜닝 |
+| maximumScreenSpaceError 기본값 (공개 옵션) | 16 | Cesium 표준 노브. 선행 구현 기본값은 8 — 데모에서 비교 |
+| 호스트당 동시 요청 상한 | 6 | HTTP/1.1 브라우저 연결 천장. 초과 시 타임아웃 폭풍 실측 선례. HTTP/2 CDN이면 상향 실험 |
+| Worker 풀 크기 | 4 | 선행 실측상 디코드는 비병목(전체 시간의 <1%) — 확대 이득 낮음 |
+| 예산 상한: Range 동시 body | 32MB | 임의 시작점. 첫 프로파일링에서 재설정 |
+| 예산 상한: decode 동시 작업 | 풀 크기 × 2 | 임의 시작점. Worker 큐 깊이 관측으로 조정 |
+| 예산 상한: hierarchy 페이지 캐시 | 64개 | 임의 시작점. 페이지당 수 KB라 여유 있게 |
+| POSITION_QUANTIZED (uint16 양자화) | 미적용 | 전송은 LAZ라 전송량 무관 — GPU 메모리 절반 최적화. 평가 후 도입 후보 |
