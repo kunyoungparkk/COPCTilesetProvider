@@ -19,6 +19,7 @@ data/
 # Claude Code local overlays
 CLAUDE.local.md
 .claude/settings.local.json
+.superpowers/
 
 # OS / editor / logs
 .DS_Store

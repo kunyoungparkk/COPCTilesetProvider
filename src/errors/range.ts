@@ -1,0 +1,123 @@
+import { CopcTilesetError } from './base.js';
+
+/**
+ * The server answered a Range request with a success status other than 206.
+ *
+ * Decision 4 rules out a 200 fallback: downloading the whole file would defeat
+ * the one thing this library exists to do.
+ */
+export class RangeUnsupportedError extends CopcTilesetError {
+  readonly code = 'range-unsupported';
+  readonly url: string;
+  readonly status: number;
+
+  constructor(url: string, status: number) {
+    super(
+      `${url} answered a Range request with HTTP ${status} instead of 206 Partial Content. ` +
+        'This library reads COPC files in pieces and never downloads them whole, so a ' +
+        'server that ignores Range cannot be used. Host the file where byte ranges work ' +
+        '(S3, nginx, or any static host that reports `Accept-Ranges: bytes`).',
+    );
+    this.url = url;
+    this.status = status;
+  }
+}
+
+/** The request itself was rejected — a 4xx or 5xx. */
+export class RangeRequestFailedError extends CopcTilesetError {
+  readonly code = 'range-request-failed';
+  readonly url: string;
+  readonly status: number;
+
+  constructor(url: string, status: number) {
+    super(
+      `${url} returned HTTP ${status}. ` +
+        (status >= 500
+          ? 'The server reported a temporary failure and the request did not succeed within the configured retry budget.'
+          : 'The request was rejected, so resending it would return the same answer. ' +
+            'Check the URL, and whether the object requires credentials this library does not send.'),
+    );
+    this.url = url;
+    this.status = status;
+  }
+}
+
+/**
+ * `fetch` rejected before any response arrived.
+ *
+ * In a browser the usual cause is CORS: a cross-origin file whose server does
+ * not send `Access-Control-Allow-Origin` fails here, before status or headers
+ * exist to inspect.
+ */
+export class RangeNetworkError extends CopcTilesetError {
+  readonly code = 'range-network';
+  readonly url: string;
+
+  constructor(url: string, cause: unknown) {
+    super(
+      `${url} could not be reached. If the file is on another origin, the server must send ` +
+        '`Access-Control-Allow-Origin` for the browser to allow the request at all. ' +
+        'Otherwise the host is unreachable or the URL is wrong.',
+      { cause },
+    );
+    this.url = url;
+  }
+}
+
+/** The request outlived its deadline. */
+export class RangeTimeoutError extends CopcTilesetError {
+  readonly code = 'range-timeout';
+  readonly url: string;
+  readonly timeoutMs: number;
+
+  constructor(url: string, timeoutMs: number) {
+    super(
+      `${url} did not respond within ${timeoutMs}ms. The deadline scales with request ` +
+        'size; a server this slow will not stream a point cloud usefully.',
+    );
+    this.url = url;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * A 206 arrived with no readable `Content-Range`.
+ *
+ * Decision 4 treats this as fatal rather than retryable: for a cross-origin
+ * file the browser hides the header unless the server opts in, and nothing the
+ * library does on a second attempt will change that.
+ */
+export class ContentRangeUnreadableError extends CopcTilesetError {
+  readonly code = 'content-range-unreadable';
+  readonly url: string;
+
+  constructor(url: string) {
+    super(
+      `${url} returned 206 but its Content-Range header could not be read, so the ` +
+        'response cannot be verified. For a cross-origin file the browser hides that ' +
+        'header unless the server sends `Access-Control-Expose-Headers: Content-Range`. ' +
+        'That is a server setting this library cannot work around, and retrying will ' +
+        'not change it.',
+    );
+    this.url = url;
+  }
+}
+
+/** The bytes that came back are not the bytes that were asked for. */
+export class ContentRangeMismatchError extends CopcTilesetError {
+  readonly code = 'content-range-mismatch';
+  readonly url: string;
+  readonly expected: string;
+  readonly received: string;
+
+  constructor(url: string, expected: string, received: string) {
+    super(
+      `${url} was asked for ${expected} but answered with ${received}. The library ` +
+        'reads structure at exact offsets, so a shifted or truncated response would be ' +
+        'parsed as corrupt data. Check for a proxy or CDN that rewrites range requests.',
+    );
+    this.url = url;
+    this.expected = expected;
+    this.received = received;
+  }
+}

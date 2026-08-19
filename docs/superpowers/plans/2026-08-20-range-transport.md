@@ -175,7 +175,7 @@ export class RangeRequestFailedError extends CopcTilesetError {
     super(
       `${url} returned HTTP ${status}. ` +
         (status >= 500
-          ? 'The server failed temporarily and the request was retried without success.'
+          ? 'The server reported a temporary failure and the request did not succeed within the configured retry budget.'
           : 'The request was rejected, so resending it would return the same answer. ' +
             'Check the URL, and whether the object requires credentials this library does not send.'),
     );
@@ -707,7 +707,7 @@ Expected: FAIL — the read rejects as `range-network`, not `range-timeout`, bec
 
 - [ ] **Step 3: Add the deadline**
 
-In `src/range/range-reader.ts`, import `RangeTimeoutError` alongside the other errors, extend the options, and wrap the fetch:
+In `src/range/range-reader.ts`, import `RangeTimeoutError` and `CopcTilesetError` alongside the other errors, extend the options, and make the deadline guard the fetch, the verification layers, and the body read together:
 
 ```ts
 // Defaults come from OVERVIEW §7. Changing them requires a measurement and an
@@ -739,20 +739,73 @@ Inside `createRangeReader`, before `read`:
   }
 ```
 
-Replace the fetch block in `read` with:
+Replace everything in `read` after `const requested = formatRangeHeader(range);` with:
 
 ```ts
     const timeoutMs = deadlineFor(range);
     const controller = new AbortController();
+    // Hand-rolled instead of AbortSignal.timeout: Vitest's fake timers patch
+    // setTimeout, so vi.advanceTimersByTimeAsync can fast-forward this
+    // deadline in tests. AbortSignal.timeout runs on a timer the fake clock
+    // cannot reach, which would turn a millisecond test into a real sleep.
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    let response: Response;
     try {
-      response = await doFetch(url, {
+      const response = await doFetch(url, {
         headers: { range: requested },
         signal: controller.signal,
       });
+
+      if (response.status !== 206) {
+        // Decision 4: a 200 is the whole file, which this library never accepts.
+        if (response.status === 200) {
+          void response.body?.cancel();
+          throw new RangeUnsupportedError(url, 200);
+        }
+        if (response.status >= 400) {
+          void response.body?.cancel();
+          throw new RangeRequestFailedError(url, response.status);
+        }
+        void response.body?.cancel();
+        throw new RangeUnsupportedError(url, response.status);
+      }
+
+      const header = response.headers.get('content-range');
+      if (header === null) {
+        void response.body?.cancel();
+        throw new ContentRangeUnreadableError(url);
+      }
+
+      const parsed = parseContentRange(header);
+      const lastByte = range.offset + range.length - 1;
+      if (parsed === null || parsed.start !== range.offset || parsed.end !== lastByte) {
+        void response.body?.cancel();
+        throw new ContentRangeMismatchError(url, requested, header);
+      }
+
+      // The deadline has to cover this read too: for a static byte range,
+      // time-to-headers barely depends on size, so body transfer is the only
+      // phase that actually scales with request length. OVERVIEW §7 sizes
+      // timeoutMsPerMebibyte for exactly that phase — a term that protects
+      // nothing if the clock stops before this line runs.
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength !== range.length) {
+        // The header agreed but the body did not — a truncated or rewritten response.
+        throw new ContentRangeMismatchError(
+          url,
+          `${requested} (${range.length} bytes)`,
+          `${header} (${bytes.byteLength} bytes)`,
+        );
+      }
+
+      return { bytes, totalBytes: parsed.totalBytes };
     } catch (cause) {
+      // The checks above throw our own typed errors; let those pass through
+      // untouched instead of relabeling a verification failure as a
+      // transport one.
+      if (cause instanceof CopcTilesetError) {
+        throw cause;
+      }
       throw controller.signal.aborted
         ? new RangeTimeoutError(url, timeoutMs)
         : new RangeNetworkError(url, cause);
@@ -761,7 +814,15 @@ Replace the fetch block in `read` with:
     }
 ```
 
-> The timer is cleared as soon as headers arrive. Reading the body is not covered by the deadline — a server that stalls mid-body is a different failure, and the budget module (Decision 5) is what bounds it.
+> The deadline wraps the body read too, not just the wait for headers: for a
+> static byte range, time-to-headers barely depends on size, so body transfer
+> is the only phase that scales with request length, and OVERVIEW §7 sizes
+> `timeoutMsPerMebibyte` for exactly that phase. A response verified as ours
+> passes through untouched; anything else — including a stall mid-body — is
+> classified as a timeout or network failure by the same controller. Each
+> throw between headers and the body read also cancels the response body first
+> (`void response.body?.cancel()`), so a rejected response releases its
+> connection immediately instead of waiting for GC.
 
 - [ ] **Step 4: Run the tests**
 
@@ -888,7 +949,7 @@ function isWorthRetrying(error: unknown): boolean {
 }
 ```
 
-Import `CopcTilesetError` alongside the others, add `readonly retryDelaysMs?: readonly number[]` to `RangeReaderOptions`, then rename the existing `read` to `readOnce` and wrap it:
+`CopcTilesetError` is already imported (Task 4's deadline needs it too, to let its own verification errors pass through). Add `readonly retryDelaysMs?: readonly number[]` to `RangeReaderOptions`, then rename the existing `read` to `readOnce` and wrap it:
 
 ```ts
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
