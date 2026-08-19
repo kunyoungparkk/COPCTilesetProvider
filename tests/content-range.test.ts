@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatRangeHeader, parseContentRange } from '../src/range/content-range.js';
+import { InvalidByteRangeError } from '../src/errors/index.js';
 
 describe('formatRangeHeader', () => {
   it('converts offset and length into an inclusive byte range', () => {
@@ -44,5 +45,37 @@ describe('parseContentRange', () => {
     ['an empty header', ''],
   ])('rejects %s', (_label, header) => {
     expect(parseContentRange(header)).toBeNull();
+  });
+});
+
+describe('formatRangeHeader refusals', () => {
+  // Left unguarded this emits `bytes=0--1`, which a server answers with a
+  // confusing 416 rather than the real complaint.
+  it('refuses a zero-length range', () => {
+    expect(() => formatRangeHeader({ offset: 0, length: 0 })).toThrow(InvalidByteRangeError);
+  });
+
+  it('refuses a negative length', () => {
+    expect(() => formatRangeHeader({ offset: 10, length: -1 })).toThrow(InvalidByteRangeError);
+  });
+
+  it('refuses a negative offset', () => {
+    expect(() => formatRangeHeader({ offset: -1, length: 4 })).toThrow(InvalidByteRangeError);
+  });
+});
+
+describe('parseContentRange bounds', () => {
+  // Same doctrine as the `end < start` refusal: totalBytes is handed to callers
+  // who do EOF arithmetic with it, so a header that contradicts itself is refused.
+  it('refuses a range that ends past the total size', () => {
+    expect(parseContentRange('bytes 0-3/2')).toBeNull();
+  });
+
+  it('accepts a range ending on the last byte', () => {
+    expect(parseContentRange('bytes 0-1/2')?.end).toBe(1);
+  });
+
+  it('still accepts an undisclosed total', () => {
+    expect(parseContentRange('bytes 0-3/*')?.totalBytes).toBeNull();
   });
 });

@@ -34,8 +34,14 @@ export class RangeRequestFailedError extends CopcTilesetError {
       `${url} returned HTTP ${status}. ` +
         (status >= 500
           ? 'The server reported a temporary failure and the request did not succeed within the configured retry budget.'
-          : 'The request was rejected, so resending it would return the same answer. ' +
-            'Check the URL, and whether the object requires credentials this library does not send.'),
+          : status === 416
+            ? // The one status a range request can provoke by itself: we asked
+              // past EOF, which means the file is not what we were told it was.
+              'The requested bytes lie past the end of the file, so it has most ' +
+              'likely been replaced or truncated since it was opened. Reload the ' +
+              'tileset to read the current file.'
+            : 'The request was rejected, so resending it would return the same answer. ' +
+              'Check the URL, and whether the object requires credentials this library does not send.'),
     );
     this.url = url;
     this.status = status;
@@ -119,5 +125,28 @@ export class ContentRangeMismatchError extends CopcTilesetError {
     this.url = url;
     this.expected = expected;
     this.received = received;
+  }
+}
+
+/**
+ * A byte range that could not have come from a real descriptor.
+ *
+ * Decision 4 builds every request from an offset and size some earlier response
+ * reported, so a zero-length or negative range is not something a server can
+ * cause — it is a bug in how the descriptor was constructed. Decision 6 set the
+ * precedent with the empty-node invariant: conditions our own structure makes
+ * impossible fail loudly rather than being quietly tolerated.
+ */
+export class InvalidByteRangeError extends CopcTilesetError {
+  readonly code = 'invalid-byte-range';
+  readonly detail: string;
+
+  constructor(detail: string) {
+    super(
+      `Invalid byte range: ${detail}. Ranges are derived from offsets and sizes a ` +
+        'previous response reported, so this is a bug in how the range was built ' +
+        'rather than anything a server did.',
+    );
+    this.detail = detail;
   }
 }

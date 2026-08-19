@@ -453,7 +453,18 @@ export function planCoalescedReads(
 
   const ordered = requests
     .map((range, index) => {
-      if (range.length < 1 || range.offset < 0) {
+      // Integers as well as bounds, for the reason formatRangeHeader names:
+      // two fractional ranges can sum to an integral span, which then passes
+      // the Range header, the Content-Range check and the body-length check
+      // alike, leaving ArrayBuffer.slice to truncate toward zero and hand two
+      // callers overlapping, wrong-length buffers. Decision 6's doctrine —
+      // what our own structure makes impossible fails loudly — applies here.
+      if (
+        !Number.isInteger(range.offset) ||
+        !Number.isInteger(range.length) ||
+        range.length < 1 ||
+        range.offset < 0
+      ) {
         throw new InvalidByteRangeError(
           `length ${range.length} at offset ${range.offset} (request ${index})`,
         );
@@ -654,7 +665,7 @@ Inside `createRangeReader`, after the existing option reads:
   };
 ```
 
-> Spread-on-condition rather than passing `undefined` through: `exactOptionalPropertyTypes` is on, so an explicit `undefined` is not the same as an absent property and would not fall back to the planner's default.
+> Spread-on-condition rather than passing the options straight through: `exactOptionalPropertyTypes` is on, so a `number | undefined` property is not assignable to `CoalesceOptions`' optional `maxGapBytes?: number` — forwarding them directly does not compile. The planner's own `??` fallbacks would supply the §7 defaults either way, so this is a typechecker constraint, not a runtime one.
 
 Then, beside `read`:
 
@@ -842,15 +853,25 @@ Expected: FAIL — `stats is not a function`.
 In `src/range/range-reader.ts`:
 
 ```ts
+/**
+ * Every field counts what reached the network, never what a plan proposed:
+ * §7 re-measures against an observable Range server, and only counters drawn
+ * from the same population as that server's log can be compared with it or
+ * divided by each other.
+ */
 export interface RangeStats {
   /** HTTP requests issued, counting each retry separately. */
   readonly requests: number;
+  /** Retry waits that ran to completion. */
   readonly retries: number;
   /** Bytes asked for across those requests, gap bytes included. */
   readonly bytesRequested: number;
-  /** Of those, bytes no caller wanted — the price merging paid. */
+  /**
+   * Of those bytes, the ones no caller wanted — the price merging paid.
+   * Per request like `bytesRequested`, so a retried merge pays its gap again.
+   */
   readonly bytesWasted: number;
-  /** Round trips merging removed. */
+  /** Round trips merging removed, counted once the merged read has succeeded. */
   readonly requestsSaved: number;
 }
 ```
@@ -871,27 +892,76 @@ Inside `createRangeReader`, before `deadlineFor`:
   };
 ```
 
+`bytesWasted` is counted at the wire like the rest, so `readOnce` has to be told
+how much of the span a caller actually asked for. Give it and `read` a
+`wantedBytes` parameter — Task 5 will insert `signal` ahead of it:
+
+```ts
+  /**
+   * One attempt at one span.
+   *
+   * `wantedBytes` is how much of the span some caller actually asked for; the
+   * remainder is gap the merge paid for (Decision 4). It defaults to the whole
+   * span, so an unmerged read reports no waste.
+   */
+  async function readOnce(
+    range: ByteRange,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
+```
+
 At the top of `readOnce`, right after `const requested = formatRangeHeader(range);`:
 
 ```ts
     counters.requests += 1;
     counters.bytesRequested += range.length;
+    // Counted here, beside the bytes it is a share of, rather than when the
+    // merge was planned: §7 divides these two, which only means anything while
+    // both count the same attempts.
+    counters.bytesWasted += range.length - wantedBytes;
 ```
 
-In `read`, immediately before `await sleep(delayMs);`:
+`read` forwards it, and counts a retry only once the wait has run to completion —
+immediately **after** `await sleep(delayMs);`, not before it:
 
 ```ts
+  async function read(
+    range: ByteRange,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await readOnce(range, wantedBytes);
+      } catch (error) {
+        const delayMs = retryDelaysMs[attempt];
+        if (delayMs === undefined || !isWorthRetrying(error)) {
+          throw error;
+        }
+        await sleep(delayMs);
+        // Counted after the wait, not before it: once Task 5 makes the wait
+        // interruptible, a cancel during the delay means this retry never
+        // happened, and readOnce likewise counts only attempts that reached
+        // the network.
         counters.retries += 1;
+      }
+    }
+  }
 ```
 
-In `readMany`, right after the plan is computed:
+In `readMany`, hand each group's read its wanted total and count the round trip
+the merge saved only once that read has come back:
 
 ```ts
-    for (const group of groups) {
-      counters.bytesWasted +=
-        group.span.length - group.slices.reduce((total, slice) => total + slice.length, 0);
-      counters.requestsSaved += group.slices.length - 1;
-    }
+      groups.map(async (group) => {
+        const wantedBytes = group.slices.reduce((total, slice) => total + slice.length, 0);
+        const { bytes } = await read(group.span, wantedBytes);
+        // Counted here rather than when the group was planned: a merge whose
+        // request never went out, or never came back, saved no round trip.
+        counters.requestsSaved += group.slices.length - 1;
+        for (const slice of group.slices) {
+          results[slice.index] = bytes.slice(slice.offset, slice.offset + slice.length);
+        }
+      }),
 ```
 
 And the accessor, beside `readMany`:
@@ -1061,15 +1131,24 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 - [ ] **Step 4: Thread the signal through**
 
-Give `readOnce` a second parameter and link the signals:
+Give `readOnce` a `signal` parameter, ahead of the `wantedBytes` Task 4 added,
+and link the signals:
 
 ```ts
-  async function readOnce(range: ByteRange, signal?: AbortSignal): Promise<RangeRead> {
+  async function readOnce(
+    range: ByteRange,
+    signal?: AbortSignal,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
+    // Checked first, before the counters below: a read cancelled before it
+    // reached the network must not appear in figures meant to match what a
+    // server would log.
     signal?.throwIfAborted();
 
     const requested = formatRangeHeader(range);
     counters.requests += 1;
     counters.bytesRequested += range.length;
+    counters.bytesWasted += range.length - wantedBytes;
 
     const timeoutMs = deadlineFor(range);
     const controller = new AbortController();
@@ -1104,17 +1183,23 @@ In the `catch`, ask about the caller's signal before anything else:
 Then pass the signal down through `read` and `readMany`:
 
 ```ts
-  async function read(range: ByteRange, signal?: AbortSignal): Promise<RangeRead> {
+  async function read(
+    range: ByteRange,
+    signal?: AbortSignal,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await readOnce(range, signal);
+        return await readOnce(range, signal, wantedBytes);
       } catch (error) {
         const delayMs = retryDelaysMs[attempt];
         if (delayMs === undefined || !isWorthRetrying(error)) {
           throw error;
         }
-        counters.retries += 1;
         await sleep(delayMs, signal);
+        // The wait is interruptible now, so Task 4's ordering starts earning
+        // its keep: a cancel during the delay means this retry never happened.
+        counters.retries += 1;
       }
     }
   }
@@ -1127,7 +1212,7 @@ Then pass the signal down through `read` and `readMany`:
   ): Promise<ArrayBuffer[]> {
 ```
 
-and inside it, `await read(group.span, signal)`.
+and inside it, `await read(group.span, signal, wantedBytes)`.
 
 Update the two signatures on the `RangeReader` interface to match.
 

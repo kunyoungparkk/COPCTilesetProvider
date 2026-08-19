@@ -3,6 +3,7 @@ import {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
   CopcTilesetError,
+  InvalidByteRangeError,
   RangeNetworkError,
   RangeRequestFailedError,
   RangeTimeoutError,
@@ -82,5 +83,34 @@ describe('transport errors', () => {
     expect(error.message).toContain('bytes 0-999');
     expect(error.message).toContain('bytes 0-1023');
     expect(error.message).toContain('shifted or truncated');
+  });
+});
+
+describe('InvalidByteRangeError', () => {
+  it('blames the caller rather than the server', () => {
+    const error = new InvalidByteRangeError('length 0 at offset 375');
+
+    expect(error.code).toBe('invalid-byte-range');
+    expect(error.detail).toBe('length 0 at offset 375');
+    expect(error.message).toContain('length 0 at offset 375');
+    // Decision 4 builds every range from what a previous response reported, so
+    // this can only be our own bug — the message has to say so.
+    expect(error.message).toContain('bug');
+  });
+});
+
+describe('RangeRequestFailedError on 416', () => {
+  it('names the one cause a range request has for 416', () => {
+    const message = new RangeRequestFailedError('https://host/a.copc.laz', 416).message;
+
+    expect(message).toContain('past the end');
+    // The generic 4xx advice about credentials would send the reader the wrong way.
+    expect(message).not.toContain('credentials');
+  });
+
+  it('still gives the generic advice for other 4xx', () => {
+    expect(new RangeRequestFailedError('https://host/a.copc.laz', 403).message).toContain(
+      'credentials',
+    );
   });
 });

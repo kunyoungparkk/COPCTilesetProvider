@@ -7,6 +7,7 @@ import {
   RangeTimeoutError,
   RangeUnsupportedError,
 } from '../errors/index.js';
+import { planCoalescedReads } from './coalesce.js';
 import { formatRangeHeader, parseContentRange, type ByteRange } from './content-range.js';
 
 // Defaults come from OVERVIEW §7. Changing them requires a measurement and an
@@ -19,7 +20,38 @@ const BYTES_PER_MEBIBYTE = 1024 * 1024;
 // retry count — one delay per retry, so the two cannot drift apart.
 const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [500, 2_000];
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * A delay a caller's abort can cut short, so a cancel is not stalled by a retry wait.
+ *
+ * Exported for tests only, and deliberately absent from `src/range/index.ts` so
+ * the package surface is unchanged. Nothing outside this module should call it.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal === undefined) {
+      setTimeout(resolve, ms);
+      return;
+    }
+    // Sole guard for one window: an abort landing between readOnce's catch and
+    // this call is already over by the time the listener below is attached, and
+    // `abort` does not replay for a listener added after it fired.
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /**
  * Decides whether resending a request could produce a different answer.
@@ -52,6 +84,10 @@ export interface RangeReaderOptions {
    * `[500, 2_000]` (OVERVIEW §7).
    */
   readonly retryDelaysMs?: readonly number[];
+  /** Largest gap between two ranges that may still be read as one. Defaults to 256 KiB (§7). */
+  readonly maxGapBytes?: number;
+  /** Largest share of a merged span that may be bytes nobody asked for. Defaults to 0.02 (§7). */
+  readonly maxWasteRatio?: number;
 }
 
 export interface RangeRead {
@@ -60,8 +96,48 @@ export interface RangeRead {
   readonly totalBytes: number | null;
 }
 
+/**
+ * Cumulative counters for a reader's lifetime, snapshotted at the moment
+ * `stats()` is called.
+ *
+ * §7 tunes the merge thresholds against measured request counts and waste,
+ * so these figures have to be observable at any time rather than inferred
+ * from logs. `bytesWasted / bytesRequested` is the ratio §7 is tuned
+ * against — deliberately not stored as its own field, so there is one
+ * source of truth and nothing that can go stale.
+ *
+ * Every field counts what reached the network, never what a plan proposed:
+ * §7 re-measures against an observable Range server, and only counters drawn
+ * from the same population as that server's log can be compared with it or
+ * divided by each other.
+ */
+export interface RangeStats {
+  /** HTTP requests issued, counting each retry separately. */
+  readonly requests: number;
+  /** Retry waits that ran to completion. */
+  readonly retries: number;
+  /** Bytes asked for across those requests, gap bytes included. */
+  readonly bytesRequested: number;
+  /**
+   * Of those bytes, the ones no caller wanted — the price merging paid.
+   * Per request like `bytesRequested`, so a retried merge pays its gap again.
+   */
+  readonly bytesWasted: number;
+  /** Round trips merging removed, counted once the merged read has succeeded. */
+  readonly requestsSaved: number;
+}
+
 export interface RangeReader {
-  read(range: ByteRange): Promise<RangeRead>;
+  read(range: ByteRange, signal?: AbortSignal): Promise<RangeRead>;
+  /**
+   * Reads several ranges, merging neighbours into shared requests.
+   *
+   * Returns one buffer per request, in the caller's order, whatever grouping
+   * the planner chose.
+   */
+  readMany(requests: readonly ByteRange[], signal?: AbortSignal): Promise<ArrayBuffer[]>;
+  /** A snapshot of the counters accumulated since this reader was created. */
+  stats(): RangeStats;
 }
 
 /**
@@ -78,6 +154,27 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
   const timeoutMsPerMebibyte = options.timeoutMsPerMebibyte ?? DEFAULT_TIMEOUT_MS_PER_MEBIBYTE;
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
+  // Built with a conditional spread rather than passed straight through:
+  // exactOptionalPropertyTypes is on, so a `number | undefined` property is not
+  // assignable to CoalesceOptions' optional `maxGapBytes?: number` — forwarding
+  // options.maxGapBytes/maxWasteRatio directly does not compile. The planner's
+  // own `??` fallbacks would supply the §7 defaults either way, so this is a
+  // typechecker constraint, not a runtime one.
+  const coalesceOptions = {
+    ...(options.maxGapBytes !== undefined && { maxGapBytes: options.maxGapBytes }),
+    ...(options.maxWasteRatio !== undefined && { maxWasteRatio: options.maxWasteRatio }),
+  };
+
+  // §7 tunes the merge thresholds against measured request counts and waste, so
+  // those figures have to be observable at all times rather than inferred.
+  const counters = {
+    requests: 0,
+    retries: 0,
+    bytesRequested: 0,
+    bytesWasted: 0,
+    requestsSaved: 0,
+  };
+
   // Coalescing (Decision 4) makes some requests much larger than others, so the
   // deadline grows with size. A flat timeout would kill exactly the big merged
   // reads that coalescing exists to create.
@@ -85,8 +182,31 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     return baseTimeoutMs + Math.ceil(range.length / BYTES_PER_MEBIBYTE) * timeoutMsPerMebibyte;
   }
 
-  async function readOnce(range: ByteRange): Promise<RangeRead> {
+  /**
+   * One attempt at one span.
+   *
+   * `wantedBytes` is how much of the span some caller actually asked for; the
+   * remainder is gap the merge paid for (Decision 4). It defaults to the whole
+   * span, so an unmerged read reports no waste.
+   */
+  async function readOnce(
+    range: ByteRange,
+    signal?: AbortSignal,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
+    // Checked first, before the counters below: a read cancelled before it
+    // reached the network must not appear in figures meant to match what a
+    // server would log.
+    signal?.throwIfAborted();
+
     const requested = formatRangeHeader(range);
+
+    counters.requests += 1;
+    counters.bytesRequested += range.length;
+    // Counted here, beside the bytes it is a share of, rather than when the
+    // merge was planned: §7 divides these two, which only means anything while
+    // both count the same attempts.
+    counters.bytesWasted += range.length - wantedBytes;
 
     const timeoutMs = deadlineFor(range);
     const controller = new AbortController();
@@ -95,6 +215,12 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     // deadline in tests. AbortSignal.timeout runs on a timer the fake clock
     // cannot reach, which would turn a millisecond test into a real sleep.
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    // The caller's own signal shares this fetch's controller, so an external
+    // cancel ends the request the same way the deadline does. The catch
+    // block below is what tells the two apart afterward.
+    const onCallerAbort = (): void => controller.abort();
+    signal?.addEventListener('abort', onCallerAbort, { once: true });
 
     try {
       const response = await doFetch(url, {
@@ -146,6 +272,11 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
 
       return { bytes, totalBytes: parsed.totalBytes };
     } catch (cause) {
+      // The caller's abort also trips our deadline controller, so this has to
+      // come first — otherwise a cancelled read is reported as a timeout.
+      // This guards the attempt itself; sleep()'s already-aborted check guards
+      // the way into the next one. Neither makes the other redundant.
+      signal?.throwIfAborted();
       // The checks above throw our own typed errors; let those pass through
       // untouched instead of relabeling a verification failure as a
       // transport one.
@@ -157,22 +288,63 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
         : new RangeNetworkError(url, cause);
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onCallerAbort);
     }
   }
 
-  async function read(range: ByteRange): Promise<RangeRead> {
+  async function read(
+    range: ByteRange,
+    signal?: AbortSignal,
+    wantedBytes: number = range.length,
+  ): Promise<RangeRead> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await readOnce(range);
+        return await readOnce(range, signal, wantedBytes);
       } catch (error) {
         const delayMs = retryDelaysMs[attempt];
         if (delayMs === undefined || !isWorthRetrying(error)) {
           throw error;
         }
-        await sleep(delayMs);
+        await sleep(delayMs, signal);
+        // Counted after the wait, not before it: a cancel during the delay
+        // means this retry never happened, and readOnce likewise counts only
+        // attempts that reached the network.
+        counters.retries += 1;
       }
     }
   }
 
-  return { read };
+  async function readMany(
+    requests: readonly ByteRange[],
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer[]> {
+    const groups = planCoalescedReads(requests, coalesceOptions);
+    const results: ArrayBuffer[] = new Array<ArrayBuffer>(requests.length);
+
+    // Groups run concurrently on purpose. Coalescing exists to remove round
+    // trips, and serialising what is left would give the latency back. Bounding
+    // how many run at once is admission control's job (Decision 5), and this
+    // reader only ever sees ranges the budget already approved.
+    await Promise.all(
+      groups.map(async (group) => {
+        const wantedBytes = group.slices.reduce((total, slice) => total + slice.length, 0);
+        const { bytes } = await read(group.span, signal, wantedBytes);
+        // Counted here rather than when the group was planned: a merge whose
+        // request never went out, or never came back, saved no round trip.
+        counters.requestsSaved += group.slices.length - 1;
+        for (const slice of group.slices) {
+          results[slice.index] = bytes.slice(slice.offset, slice.offset + slice.length);
+        }
+      }),
+    );
+
+    return results;
+  }
+
+  function stats(): RangeStats {
+    // A copy, so a caller holding an old snapshot sees the numbers as they were.
+    return { ...counters };
+  }
+
+  return { read, readMany, stats };
 }
