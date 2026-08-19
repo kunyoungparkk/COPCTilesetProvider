@@ -28,10 +28,21 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
 - 지원 버전을 검증된 1.142.0~1.143.x로 제한 (peer dependency)
 - 경계 규칙: source는 Cesium을 모른다. cesium-runtime 밖에서 underscore
   필드·factory 접근 시 정적 검사가 빌드를 실패시킨다.
-- 검증 현황: 슬롯 존재는 1.142·1.143에서 확인 완료(Gate 0). 동일 과제 출품작은 이 슬롯을 missingTilePolicy(빈 타일 처리)에만 썼고, `createContent`로 콘텐츠 전체를 공급한 사례는 아직 없다.
-  **남은 미지수는 createContent가 반환해야하는 객체의 정확한 계약**이며, hard gate가 이것을 검증한다.
+- 검증 현황: **hard gate 통과**(1.143.0, headless Chromium). 계약은 미지수가 아니라 Cesium 소스에
+  문서화돼 있고(`Cesium3DTileset.js`의 `_runtimeContentCodec` JSDoc), first-party `MVTDataProvider`가
+  같은 패턴으로 콘텐츠 전체를 공급한다. 게이트는 Cesium이 파싱할 수 없는 마커 바이트를 서빙해
+  point 타일 렌더·hierarchy의 external tileset 확장·음성 대조군(코덱 미설치 시 FAILED, 0픽셀)까지 확인했다.
+- 계약이 부과하는 구현 제약 세 가지:
+  1. 합성 tileset의 content URI는 절대경로여야 한다. Blob URL 기준 상대 해석은 동작하지 않으며,
+     Cesium 자신도 `getAbsoluteUri`로 절대화한다.
+  2. 코덱 분기는 조기 return이라 Cesium의 콘텐츠 분류를 통째로 건너뛴다. `hasTilesetContent`·
+     `hasRenderableContent`·`content.metadata`·`content.group`은 코덱이 직접 세팅해야 한다.
+     hierarchy를 external tileset으로 확장할 때 이걸 빠뜨리면 서브트리가 아예 열리지 않는다.
+  3. 코덱의 `disableSkipLevelOfDetail` 필드는 문서에만 있고 1.143에서 읽는 코드가 없다.
+     `skipLevelOfDetail`은 tileset 생성 옵션으로 넘긴다.
 - 회귀 가드: 설치된 Cesium 소스에서 계약 문자열(예: `this._runtimeContentCodec = undefined`)의 존재를 확인하는 오프라인 정적 검사를 CI에 둔다.
   브라우저 없이, Cesium 버전이 바뀌어 이 결합이 깨지는 순간을 잡기 위함이다.
+  구현: `tests/cesium-contract.test.ts` (각 단정은 Cesium 소스를 변형해 실패하는지 확인함).
 
 **결정 3 — 무거운 일은 전부 Web Worker에서.**
 LAZ 압축 해제(laz-perf WASM)·좌표 변환·PNTS 인코딩을 Worker에서 수행, 메인 스레드는 조율만 한다.
