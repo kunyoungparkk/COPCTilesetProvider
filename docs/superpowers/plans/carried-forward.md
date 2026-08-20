@@ -19,6 +19,13 @@ rediscovered. Delete an entry when the work lands.
   and `CrsCodeNotFoundError`, which have to surface where `fromUrl` can reject;
   the same throw inside a Worker becomes an opaque `messageerror`.
 
+- **Check when Cesium fetches an external tileset whose placeholder shares its
+  geometric error.** The synthetic tileset gives a page-pointer tile and the
+  root of the tileset it expands into the same key, and therefore the same
+  geometric error. Whether traversal then fetches the expansion at the right
+  moment is a browser question; the hard gate proved the expansion path works,
+  not its timing.
+
 ## For whichever sub-project first ships a root README
 
 - **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
