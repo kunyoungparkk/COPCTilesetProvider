@@ -26,6 +26,12 @@ rediscovered. Delete an entry when the work lands.
   moment is a browser question; the hard gate proved the expansion path works,
   not its timing.
 
+- **Check that a `deferred` admission actually gets re-asked.** The budget
+  answers synchronously and holds nothing, on the reading that Cesium's
+  traversal re-requests the tile next frame (§4). If an intercepted `Resource`
+  that declines instead marks the tile failed, the tile never returns, and the
+  budget cannot tell — it has already forgotten the request by design.
+
 ## For whichever sub-project first ships a root README
 
 - **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
