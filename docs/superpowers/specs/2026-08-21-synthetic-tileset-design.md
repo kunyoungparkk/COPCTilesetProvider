@@ -95,24 +95,59 @@ resolution is the union along the path from the root, which is what ADD means.
   data entry lives inside the sub-page rather than in the page that points at
   it.
 
-### Gaps are filled; contradictions are refused
+### What the specification says an entry can be
 
-**A key is a node or a page pointer, never both** within one page. The COPC
-spec makes a page pointer *replace* the node entry it stands for, so an overlap
-means the two disagree about where that node's data is, and nothing here can
-choose. It raises `MalformedHierarchyError`, which already blames the file and
-names the entry.
+COPC 1.0 gives one `Entry` struct three meanings, selected by `pointCount`
+(quoted verbatim from the specification):
 
-**A missing intermediate is synthesised, not refused.** An entry whose parent is
-absent from the page cannot be attached to the tree, but that is not necessarily
-corruption: a writer omitting empty nodes produces exactly this, and a node's
-cube — and therefore its region and geometric error — is computable from its key
-alone. The gap is filled with contentless tiles up to `rootKey`, which is a
-shape the tree already has for zero-point nodes. Refusing here would reject
-files that are merely sparse.
+> ```
+> // Absolute offset to the data chunk if the pointCount > 0.
+> // Absolute offset to a child hierarchy page if the pointCount is -1.
+> // 0 if the pointCount is 0.
+> uint64_t offset;
+>
+> // If > 0, represents the number of points in the data chunk.
+> // If -1, indicates the information for this octree node is found in another
+> //        hierarchy page.
+> // If 0, no point data exists for this key, though may exist for child entries.
+> int32_t pointCount;
+> ```
 
-**An entry outside the subtree rooted at `rootKey`** is neither, and raises
-`MalformedHierarchyError`: it belongs to a page other than this one.
+Three things follow, and each settles a question this module would otherwise
+have had to guess at.
+
+**A zero-point node has no bytes at all** — `offset` and `byteSize` are both 0.
+There is nothing to range-request even if we wanted to, which is Decision 6's
+empty-node rule arriving from the other direction.
+
+**A contentless tile with children is the specification's own shape**, not an
+invention of this design: *"no point data exists for this key, though may exist
+for child entries."*
+
+**Empty nodes are represented, not omitted.** That removes the case this design
+briefly tried to accommodate — a writer that skips empty nodes and thereby
+leaves a child with no parent in the page. The format's answer to an empty node
+is an entry with `pointCount` 0, so an absent parent is not the ordinary
+consequence of a sparse cloud.
+
+### Contradictions and gaps are both refused
+
+**A key is a node or a page pointer, never both** within one page. The two
+meanings are alternatives of one `pointCount` field, so an overlap means two
+entries disagree about where that node's data is, and nothing here can choose.
+
+**An entry whose parent is absent from the page** cannot be placed in the tree.
+The specification does not require the hierarchy to be a complete tree, but it
+does not license a gap either, and it supplies `pointCount` 0 for the one case
+that would otherwise produce one. With no normative basis and no observed writer
+that does it, synthesising an ancestor would mean inventing a tile out of a
+guess about what the file meant.
+
+**An entry outside the subtree rooted at `rootKey`** belongs to a different
+page.
+
+All three raise `MalformedHierarchyError`, which already blames the file and
+names the offending entry.
 
 ## The numbers
 
@@ -229,11 +264,12 @@ arithmetic and therefore agrees with it whatever it does. Three defences:
 Measured, by reading `fixtures/autzen-root-hierarchy.bin` through
 `readHierarchyPage`: **278 nodes, 0 sub-pages, 0 zero-point nodes, depths 0
 through 5, and no node whose parent is missing.** Autzen's hierarchy is a single
-page.
+page — which the specification permits: *"the hierarchy MAY be arranged in a
+tree of pages, but SHALL always consist of at least ONE hierarchy page."*
 
 So the fixture exercises the node path, the depth arithmetic, and the region
 maths against real coordinates — and it cannot reach the page-pointer branch,
-the empty-node branch, the synthesised-gap branch, or either refusal, because
+the empty-node branch, or any of the three refusals, because
 the one real page we have contains no instance of any of them.
 
 Those branches are tested against hand-built pages, and each such test says in
@@ -259,5 +295,5 @@ for sub-project 8.
   interceptor is handed.
 - **`toWgs84(x, y, z)` is the only change to `src/crs`.**
 - **`Bounds.stepTo` is used rather than reimplemented.**
-- **A missing intermediate node is synthesised; a contradictory one is
-  refused.** Sparse is not corrupt.
+- **A gap and a contradiction are both refused.** The specification represents
+  empty nodes rather than omitting them, so neither has a benign reading.
