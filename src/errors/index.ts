@@ -5,6 +5,7 @@ export {
   UnsupportedHeaderLayoutError,
   WktNotInVlrsError,
 } from './copc.js';
+export { CrsCodeNotFoundError, CrsNotRegisteredError } from './crs.js';
 export {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
