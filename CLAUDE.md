@@ -56,8 +56,9 @@ Every artifact must be reviewable and continuable by a stranger:
   body explains *why* and cites the relevant OVERVIEW decision when one applies.
 - Branches: task-scoped, named `type/topic` (commit types plus `gate/` for
   go/no-go experiments). One branch = one PR = one purpose; squash-merge to
-  keep `main` linear. Never force-push `main`; on branches prefer
-  `--force-with-lease`; rebase only unpushed commits.
+  keep `main` linear, then push `main` immediately — a squash-merge left
+  unpushed leaves the shared history behind the local one. Never force-push
+  `main`; on branches prefer `--force-with-lease`; rebase only unpushed commits.
 - Tests use pinned fixtures under `fixtures/`; CI never touches the network.
 
 ## Commands
