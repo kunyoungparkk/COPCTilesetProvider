@@ -347,25 +347,10 @@ export class UnsupportedHeaderLayoutError extends CopcTilesetError {
     this.headerLength = headerLength;
   }
 }
-
-/** The WKT record is missing from the VLR region, and may be in an EVLR. */
-export class WktNotInVlrsError extends CopcTilesetError {
-  readonly code = 'wkt-not-in-vlrs';
-  readonly url: string;
-
-  constructor(url: string) {
-    super(
-      `${url} has no WKT record among its VLRs, but does declare extended VLRs, so its ` +
-        'coordinate system is probably stored there. This library reads WKT from the VLR ' +
-        'region only. Re-save the file with the WKT as a regular VLR — `pdal translate` ' +
-        'does this by default — or open an issue if extended VLRs matter for your data.',
-    );
-    this.url = url;
-  }
-}
 ```
 
-Add all three to `src/errors/index.ts`, keeping the export list alphabetical.
+Add both to `src/errors/index.ts`, keeping the export list alphabetical.
+
 
 - [ ] **Step 5: Write the reader**
 
@@ -446,11 +431,34 @@ git commit -m "feat(copc): read the header and info in one verified range"
 
 **Files:**
 - Create: `src/copc/wkt.ts`
+- Modify: `src/errors/copc.ts`, `src/errors/index.ts`
 - Test: `tests/copc-wkt.test.ts`
 
 **Interfaces:**
-- Consumes: Task 2's `RangeReader.url` and `Las.Header`; `WktNotInVlrsError` from Task 2.
-- Produces: `readWkt(reader: RangeReader, header: Las.Header, signal?: AbortSignal): Promise<string | undefined>`. Returns `undefined` when the file genuinely has no WKT; throws `WktNotInVlrsError` when it has extended VLRs that might hold one.
+- Consumes: Task 2's `RangeReader.url` and `Las.Header`.
+- Produces: `WktNotInVlrsError(url)` with code `wkt-not-in-vlrs`; `readWkt(reader: RangeReader, header: Las.Header, signal?: AbortSignal): Promise<string | undefined>`, returning `undefined` when the file genuinely has no WKT and throwing `WktNotInVlrsError` when it has extended VLRs that might hold one.
+
+This task creates the error it throws. Task 2 deliberately does not, because an
+error no code raises and no test exercises is exactly the untested-export defect
+this project's reviews keep catching. Append it to `src/errors/copc.ts`:
+
+```ts
+/** The WKT record is missing from the VLR region, and may be in an EVLR. */
+export class WktNotInVlrsError extends CopcTilesetError {
+  readonly code = 'wkt-not-in-vlrs';
+  readonly url: string;
+
+  constructor(url: string) {
+    super(
+      `${url} has no WKT record among its VLRs, but does declare extended VLRs, so its ` +
+        'coordinate system is probably stored there. This library reads WKT from the VLR ' +
+        'region only. Re-save the file with the WKT as a regular VLR — `pdal translate` ' +
+        'does this by default — or open an issue if extended VLRs matter for your data.',
+    );
+    this.url = url;
+  }
+}
+```
 
 > **Why one read rather than `Las.Vlr.walk` over the network:** `walk` fetches each record's header separately. Given the real reader that is one round trip per VLR, which is the cost coalescing exists to remove. The header already told us where the VLR region starts and ends, so one request covers all of them, and `walk` runs against a getter backed by bytes we already hold.
 
@@ -475,9 +483,9 @@ const HEADER = Las.Header.parse(HEAD.subarray(0, 375));
 /** Serves the VLR region at its real file offset, and nothing else. */
 function vlrReader(region: Uint8Array = VLRS, header: Las.Header = HEADER) {
   const reads: ByteRange[] = [];
-  const reader = {
+  const reader: RangeReader = {
     url: 'https://host/autzen.copc.laz',
-    read: (range: ByteRange) => {
+    read: (range) => {
       reads.push(range);
       const start = range.offset - header.headerLength;
       return Promise.resolve({
@@ -485,7 +493,9 @@ function vlrReader(region: Uint8Array = VLRS, header: Las.Header = HEADER) {
         totalBytes: 81_123_042,
       });
     },
-  } as unknown as RangeReader;
+    readMany: () => Promise.reject(new Error('not used here')),
+    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
+  };
   return { reader, reads };
 }
 
@@ -581,17 +591,19 @@ export async function readWkt(
   });
 
   const record = Las.Vlr.find(vlrs, WKT_USER_ID, WKT_RECORD_ID);
-  if (record === undefined || record.contentLength === 0) {
+  if (record === undefined) {
     return absentWkt(reader, header);
   }
 
   const start = record.contentOffset - offset;
   const text = new TextDecoder().decode(region.subarray(start, start + record.contentLength));
 
-  // LAS 1.4 calls for null termination, but files exist with trailing padding
-  // or an empty string where a writer meant "no CRS".
+  // LAS 1.4 calls for null termination, and files exist with trailing padding.
+  // A record that trims to nothing is a missing record, so it goes through the
+  // same judgement — returning undefined here would skip the one check that
+  // knows an extended VLR might hold the real thing.
   const trimmed = text.replace(/\0+$/, '');
-  return trimmed === '' ? undefined : trimmed;
+  return trimmed === '' ? absentWkt(reader, header) : trimmed;
 }
 
 /**
@@ -621,7 +633,7 @@ Expected: PASS, including the single-read assertion.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/copc/wkt.ts tests/copc-wkt.test.ts
+git add src/copc/wkt.ts src/errors/copc.ts src/errors/index.ts tests/copc-wkt.test.ts
 git commit -m "feat(copc): read the WKT record without interpreting it"
 ```
 
@@ -637,12 +649,13 @@ git commit -m "feat(copc): read the WKT record without interpreting it"
 - Consumes: `RangeReader`; `Hierarchy` from `copc`.
 - Produces:
   - `interface NodeKey { readonly depth: number; readonly x: number; readonly y: number; readonly z: number }`
-  - `interface NodeDescriptor { readonly key: NodeKey; readonly offset: number; readonly byteSize: number; readonly pointCount: number }`
-  - `interface PageDescriptor { readonly key: NodeKey; readonly offset: number; readonly byteSize: number }`
+  - `interface NodeDescriptor { readonly key: NodeKey; readonly offset: number; readonly length: number; readonly pointCount: number }`
+  - `interface PageDescriptor { readonly key: NodeKey; readonly offset: number; readonly length: number }`
   - `interface HierarchyPage { readonly nodes: readonly NodeDescriptor[]; readonly pages: readonly PageDescriptor[] }`
-  - `readHierarchyPage(reader: RangeReader, page: { pageOffset: number; pageLength: number }, signal?: AbortSignal): Promise<HierarchyPage>`
+  - `readHierarchyPage(reader: RangeReader, page: ByteRange, signal?: AbortSignal): Promise<HierarchyPage>`
+  - `MalformedHierarchyError(url, detail, options?)` with code `malformed-hierarchy`, in `src/errors/copc.ts` and re-exported. It covers every way a page can be unreadable — a length that is not a multiple of 32, a point count below -1, a key that is not an octree address, and an entry whose byte length is negative — because all four are defects in the file, and the error must not blame the request that fetched it. `copc.js` reports the first two as bare `Error`s with no code and no file name, so they are wrapped with the original as `cause` rather than paraphrased; the message therefore may not claim the page's byte layout is valid.
 
-> `copc.js` keys entries by the string `"depth-x-y-z"` and already splits an entry that points at a sub-page out of `nodes` into `pages`. Our job is the read, the key parsing, and renaming its fields to the `offset`/`byteSize` vocabulary the rest of this library uses for a byte range.
+> `copc.js` keys entries by the string `"depth-x-y-z"` and already splits an entry that points at a sub-page out of `nodes` into `pages`. Our job is the read, the key parsing, and renaming its fields to `offset`/`length` — the fields of `ByteRange` in `src/range/content-range.ts`, which is the library's byte-range type. Spelling them that way makes both descriptors assignable to `ByteRange`, so sub-page expansion hands this function's output straight back to `readMany` and to this function, with no translation. `copc.js`'s own `pageOffset`/`pageLength` spelling is converted once, in `openCopc`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -657,13 +670,13 @@ import type { ByteRange, RangeReader } from '../src/range/index.js';
 const ROOT = new Uint8Array(
   readFileSync(fileURLToPath(new URL('../fixtures/autzen-root-hierarchy.bin', import.meta.url))),
 );
-const ROOT_PAGE = { pageOffset: 81_114_146, pageLength: 8896 };
+const ROOT_PAGE = { offset: 81_114_146, length: 8896 };
 
 function pageReader(page: Uint8Array, at: number) {
   const reads: ByteRange[] = [];
-  const reader = {
+  const reader: RangeReader = {
     url: 'https://host/autzen.copc.laz',
-    read: (range: ByteRange) => {
+    read: (range) => {
       reads.push(range);
       const start = range.offset - at;
       return Promise.resolve({
@@ -671,7 +684,9 @@ function pageReader(page: Uint8Array, at: number) {
         totalBytes: 81_123_042,
       });
     },
-  } as unknown as RangeReader;
+    readMany: () => Promise.reject(new Error('not used here')),
+    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
+  };
   return { reader, reads };
 }
 
@@ -697,7 +712,7 @@ function buildPage(
 
 describe('readHierarchyPage against the pinned root page', () => {
   it('reads exactly the range the info VLR reported', async () => {
-    const { reader, reads } = pageReader(ROOT, ROOT_PAGE.pageOffset);
+    const { reader, reads } = pageReader(ROOT, ROOT_PAGE.offset);
 
     await readHierarchyPage(reader, ROOT_PAGE);
 
@@ -705,7 +720,7 @@ describe('readHierarchyPage against the pinned root page', () => {
   });
 
   it('finds every node Autzen puts in its root page', async () => {
-    const { reader } = pageReader(ROOT, ROOT_PAGE.pageOffset);
+    const { reader } = pageReader(ROOT, ROOT_PAGE.offset);
 
     const { nodes, pages } = await readHierarchyPage(reader, ROOT_PAGE);
 
@@ -716,14 +731,14 @@ describe('readHierarchyPage against the pinned root page', () => {
   });
 
   it('describes the root node with byte-range vocabulary', async () => {
-    const { reader } = pageReader(ROOT, ROOT_PAGE.pageOffset);
+    const { reader } = pageReader(ROOT, ROOT_PAGE.offset);
 
     const { nodes } = await readHierarchyPage(reader, ROOT_PAGE);
     const root = nodes.find((node) => node.key.depth === 0);
 
     expect(root?.key).toEqual({ depth: 0, x: 0, y: 0, z: 0 });
     expect(root?.pointCount).toBeGreaterThan(0);
-    expect(root?.byteSize).toBeGreaterThan(0);
+    expect(root?.length).toBeGreaterThan(0);
   });
 });
 
@@ -736,10 +751,10 @@ describe('readHierarchyPage against synthetic pages', () => {
     ]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes, pages } = await readHierarchyPage(reader, { pageOffset: 0, pageLength: page.length });
+    const { nodes, pages } = await readHierarchyPage(reader, { offset: 0, length: page.length });
 
-    expect(nodes).toEqual([{ key: { depth: 0, x: 0, y: 0, z: 0 }, offset: 1000, byteSize: 200, pointCount: 50 }]);
-    expect(pages).toEqual([{ key: { depth: 1, x: 0, y: 0, z: 0 }, offset: 5000, byteSize: 320 }]);
+    expect(nodes).toEqual([{ key: { depth: 0, x: 0, y: 0, z: 0 }, offset: 1000, length: 200, pointCount: 50 }]);
+    expect(pages).toEqual([{ key: { depth: 1, x: 0, y: 0, z: 0 }, offset: 5000, length: 320 }]);
   });
 
   // Decision 6 makes the tileset omit content for these rather than encode a
@@ -748,16 +763,16 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [2, 1, 1, 0], offset: 900, byteSize: 0, pointCount: 0 }]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes } = await readHierarchyPage(reader, { pageOffset: 0, pageLength: page.length });
+    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length });
 
-    expect(nodes).toEqual([{ key: { depth: 2, x: 1, y: 1, z: 0 }, offset: 900, byteSize: 0, pointCount: 0 }]);
+    expect(nodes).toEqual([{ key: { depth: 2, x: 1, y: 1, z: 0 }, offset: 900, length: 0, pointCount: 0 }]);
   });
 
   it('reads a deep key on every axis', async () => {
     const page = buildPage([{ key: [7, 96, 41, 12], offset: 10, byteSize: 20, pointCount: 30 }]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes } = await readHierarchyPage(reader, { pageOffset: 0, pageLength: page.length });
+    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length });
 
     expect(nodes[0]?.key).toEqual({ depth: 7, x: 96, y: 41, z: 12 });
   });
@@ -765,7 +780,7 @@ describe('readHierarchyPage against synthetic pages', () => {
   it('reports an empty page as no nodes rather than failing', async () => {
     const { reader } = pageReader(new Uint8Array(0), 0);
 
-    expect(await readHierarchyPage(reader, { pageOffset: 0, pageLength: 0 })).toEqual({
+    expect(await readHierarchyPage(reader, { offset: 0, length: 0 })).toEqual({
       nodes: [],
       pages: [],
     });
@@ -783,7 +798,7 @@ Expected: FAIL — cannot resolve `../src/copc/hierarchy.js`.
 ```ts
 // src/copc/hierarchy.ts
 import { Hierarchy } from 'copc';
-import { InvalidByteRangeError } from '../errors/index.js';
+import { MalformedHierarchyError } from '../errors/index.js';
 import type { RangeReader } from '../range/index.js';
 
 /** An octree address: depth, then the cell's index on each axis at that depth. */
@@ -798,7 +813,7 @@ export interface NodeKey {
 export interface NodeDescriptor {
   readonly key: NodeKey;
   readonly offset: number;
-  readonly byteSize: number;
+  readonly length: number;
   /** Zero is legal. Decision 6 leaves omitting such nodes to the tileset. */
   readonly pointCount: number;
 }
@@ -807,7 +822,7 @@ export interface NodeDescriptor {
 export interface PageDescriptor {
   readonly key: NodeKey;
   readonly offset: number;
-  readonly byteSize: number;
+  readonly length: number;
 }
 
 export interface HierarchyPage {
@@ -817,47 +832,80 @@ export interface HierarchyPage {
 
 const KEY = /^(\d+)-(\d+)-(\d+)-(\d+)$/;
 
-function parseKey(text: string): NodeKey {
+function parseKey(url: string, text: string): NodeKey {
   const match = KEY.exec(text);
   const [, depth, x, y, z] = match ?? [];
   if (depth === undefined || x === undefined || y === undefined || z === undefined) {
     // The page parsed but its keys are not octree addresses, so nothing built
-    // from them would be meaningful.
-    throw new InvalidByteRangeError(`hierarchy key ${JSON.stringify(text)} is not depth-x-y-z`);
+    // from them would be meaningful. This is a defect in the file rather than
+    // in the request that fetched it, and the error has to say which.
+    throw new MalformedHierarchyError(
+      url,
+      `its entry ${JSON.stringify(text)} is not addressed depth-x-y-z`,
+    );
   }
   return { depth: Number(depth), x: Number(x), y: Number(y), z: Number(z) };
+}
+
+// copc.js reads an entry's length field as a signed Int32, so a corrupt page
+// can hand out a negative one. Left alone it reaches formatRangeHeader, which
+// refuses it as an InvalidByteRangeError — an error that blames how the request
+// was built for a defect that is in the file.
+function checkedLength(url: string, key: string, length: number): number {
+  if (length < 0) {
+    throw new MalformedHierarchyError(
+      url,
+      `its entry ${JSON.stringify(key)} declares a negative byte length of ${length}`,
+    );
+  }
+  return length;
 }
 
 /**
  * Reads one hierarchy page and describes what it holds.
  *
- * The read goes through the reader rather than `Hierarchy.load` so that several
- * pages approved in the same frame can be coalesced into one request — the
- * whole point of Decision 4's merging rule.
+ * The read goes through the reader rather than `Hierarchy.load` so that
+ * merging stays the transport's job rather than this module's (Decision 4).
+ * Actually coalescing two pages into one request needs `readMany` and a way to
+ * hand the resulting buffers back in; both arrive with sub-page expansion.
  */
 export async function readHierarchyPage(
   reader: RangeReader,
-  page: { readonly pageOffset: number; readonly pageLength: number },
+  page: ByteRange,
   signal?: AbortSignal,
 ): Promise<HierarchyPage> {
   // Required, not an optimisation: a zero-length range is refused by
   // formatRangeHeader, so asking for one would throw instead of reporting the
   // empty page the file actually describes.
-  if (page.pageLength === 0) {
+  if (page.length === 0) {
     return { nodes: [], pages: [] };
   }
 
-  const { bytes } = await reader.read({ offset: page.pageOffset, length: page.pageLength }, signal);
-  const subtree = Hierarchy.parse(new Uint8Array(bytes));
+  const { bytes } = await reader.read(page, signal);
+
+  // A truncated or padded page, and an out-of-range point count, are the
+  // corruptions a real file is likeliest to have. copc.js reports both with a
+  // bare Error that carries no code and names no file, so they get the same
+  // typed treatment as an unreadable key (Decision 6).
+  let subtree: Hierarchy.Subtree;
+  try {
+    subtree = Hierarchy.parse(new Uint8Array(bytes));
+  } catch (cause) {
+    throw new MalformedHierarchyError(
+      reader.url,
+      'its bytes could not be parsed as hierarchy entries',
+      { cause },
+    );
+  }
 
   const nodes = Object.entries(subtree.nodes).flatMap<NodeDescriptor>(([key, node]) =>
     node === undefined
       ? []
       : [
           {
-            key: parseKey(key),
+            key: parseKey(reader.url, key),
             offset: node.pointDataOffset,
-            byteSize: node.pointDataLength,
+            length: checkedLength(reader.url, key, node.pointDataLength),
             pointCount: node.pointCount,
           },
         ],
@@ -866,7 +914,13 @@ export async function readHierarchyPage(
   const pages = Object.entries(subtree.pages).flatMap<PageDescriptor>(([key, sub]) =>
     sub === undefined
       ? []
-      : [{ key: parseKey(key), offset: sub.pageOffset, byteSize: sub.pageLength }],
+      : [
+          {
+            key: parseKey(reader.url, key),
+            offset: sub.pageOffset,
+            length: checkedLength(reader.url, key, sub.pageLength),
+          },
+        ],
   );
 
   return { nodes, pages };
@@ -900,7 +954,7 @@ git commit -m "feat(copc): turn a hierarchy page into node descriptors"
   - `openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile>`
   - `src/copc/index.ts` re-exports every public type and function above.
 
-> OVERVIEW §4 says `fromUrl` reads metadata and the root hierarchy, and nothing else. Three requests, in order, each derived from what the last one reported: the fixed first read, then the VLR region the header located, then the page the info VLR located.
+> OVERVIEW §4 says `fromUrl` reads metadata and the root hierarchy, and nothing else. Three requests: the fixed first read, then the VLR region the header located, then the page the info VLR located — reads 2 and 3 both derived from what read 1 reported, not from each other.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -924,9 +978,9 @@ const SLICES: readonly { offset: number; bytes: Uint8Array }[] = [
 /** Serves the pinned slices at their real file offsets, and refuses anything else. */
 function autzenReader() {
   const reads: ByteRange[] = [];
-  const reader = {
+  const reader: RangeReader = {
     url: 'https://host/autzen.copc.laz',
-    read: (range: ByteRange) => {
+    read: (range) => {
       reads.push(range);
       const slice = SLICES.find(
         (candidate) =>
@@ -942,7 +996,9 @@ function autzenReader() {
         totalBytes: 81_123_042,
       });
     },
-  } as unknown as RangeReader;
+    readMany: () => Promise.reject(new Error('not used here')),
+    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
+  };
   return { reader, reads };
 }
 
@@ -952,8 +1008,8 @@ describe('openCopc', () => {
 
     await openCopc(reader);
 
-    // §4: metadata and root hierarchy, nothing else. Each range is derived
-    // from what the previous response reported.
+    // §4: metadata and root hierarchy, nothing else. Reads 2 and 3 are both
+    // derived from what read 1 reported.
     expect(reads).toEqual([
       { offset: 0, length: 589 },
       { offset: 375, length: 1361 },
@@ -976,9 +1032,10 @@ describe('openCopc', () => {
 
   it('stops at the first failure instead of reading on', async () => {
     const { reader, reads } = autzenReader();
-    const broken = {
+    // Spreading a reader that already satisfies the interface needs no cast.
+    const broken: RangeReader = {
       ...reader,
-      read: (range: ByteRange) => {
+      read: (range) => {
         if (range.offset === 0) {
           const bytes = new Uint8Array(load('autzen-head.bin'));
           bytes.set(new TextEncoder().encode('JUNK'), 0);
@@ -987,7 +1044,7 @@ describe('openCopc', () => {
         }
         throw new Error('should not have read past the header');
       },
-    } as unknown as RangeReader;
+    };
 
     await expect(openCopc(broken)).rejects.toMatchObject({ code: 'not-copc' });
   });
@@ -1022,14 +1079,18 @@ export interface CopcFile {
 /**
  * Opens a COPC file: everything needed to build a tileset, and nothing else.
  *
- * OVERVIEW §4 limits this to metadata and the root hierarchy. The three reads
- * run in sequence rather than together because each one's range comes from what
- * the previous response reported — Decision 4 allows no request built on a guess.
+ * OVERVIEW §4 limits this to metadata and the root hierarchy. Read 1 must come
+ * first: the other two ranges are both taken from what it reported, and
+ * Decision 4 allows no request built on a guess.
  */
 export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile> {
   const { header, info, totalBytes } = await readFileHeader(reader, signal);
   const wkt = await readWkt(reader, header, signal);
-  const root = await readHierarchyPage(reader, info.rootHierarchyPage, signal);
+  const root = await readHierarchyPage(
+    reader,
+    { offset: info.rootHierarchyPage.pageOffset, length: info.rootHierarchyPage.pageLength },
+    signal,
+  );
 
   return { header, info, wkt, totalBytes, root };
 }

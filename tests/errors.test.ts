@@ -4,10 +4,14 @@ import {
   ContentRangeUnreadableError,
   CopcTilesetError,
   InvalidByteRangeError,
+  MalformedHierarchyError,
+  NotCopcError,
   RangeNetworkError,
   RangeRequestFailedError,
   RangeTimeoutError,
   RangeUnsupportedError,
+  UnsupportedHeaderLayoutError,
+  WktNotInVlrsError,
 } from '../src/errors/index.js';
 
 // Decision 6 makes these messages API: a caller who reads one should know what
@@ -112,5 +116,76 @@ describe('RangeRequestFailedError on 416', () => {
     expect(new RangeRequestFailedError('https://host/a.copc.laz', 403).message).toContain(
       'credentials',
     );
+  });
+});
+
+describe('MalformedHierarchyError', () => {
+  it('blames the file rather than the request that fetched it', () => {
+    const detail = 'its entry "1--2-3-4" is not addressed depth-x-y-z';
+    const error = new MalformedHierarchyError('https://host/a.copc.laz', detail);
+
+    expect(error.code).toBe('malformed-hierarchy');
+    expect(error.name).toBe('MalformedHierarchyError');
+    expect(error.detail).toBe(detail);
+    expect(error.message).toContain('https://host/a.copc.laz');
+    // Nothing a caller can pass fixes a non-conformant octree, so the message
+    // has to name the one action that does: re-writing the file.
+    expect(error.message).toContain('PDAL');
+  });
+});
+
+describe('NotCopcError', () => {
+  it('names the file, the defect, and the command that produces a COPC file', () => {
+    const error = new NotCopcError(
+      'https://host/plain.laz',
+      'the record at byte 375 is LASF_Projection/2112, not copc/1',
+    );
+
+    expect(error.code).toBe('not-copc');
+    expect(error.name).toBe('NotCopcError');
+    expect(error.detail).toBe('the record at byte 375 is LASF_Projection/2112, not copc/1');
+    expect(error.message).toContain('https://host/plain.laz');
+    expect(error.message).toContain('not copc/1');
+    // The one action that turns this file into one we can read.
+    expect(error.message).toContain('pdal translate');
+  });
+
+  it('forwards the parser complaint that explains the defect', () => {
+    const cause = new Error('Cannot convert bigint to number: 18446744073709551615');
+    const error = new NotCopcError('https://host/a.copc.laz', 'its info record failed', { cause });
+
+    // copc.js reports these as bare Errors, so dropping the cause discards the
+    // only account of what was actually wrong with the bytes.
+    expect(error.cause).toBe(cause);
+  });
+});
+
+describe('UnsupportedHeaderLayoutError', () => {
+  it('contrasts the length the file declares with the one COPC fixes', () => {
+    const error = new UnsupportedHeaderLayoutError('https://host/las14.laz', 227);
+
+    expect(error.code).toBe('unsupported-header-layout');
+    expect(error.name).toBe('UnsupportedHeaderLayoutError');
+    expect(error.headerLength).toBe(227);
+    expect(error.message).toContain('https://host/las14.laz');
+    expect(error.message).toContain('227');
+    expect(error.message).toContain('375');
+    // No option a caller can pass makes a 227-byte header readable.
+    expect(error.message).toContain('PDAL');
+  });
+});
+
+describe('WktNotInVlrsError', () => {
+  it('says where the WKT probably is and how to move it', () => {
+    const error = new WktNotInVlrsError('https://host/evlr.copc.laz');
+
+    expect(error.code).toBe('wkt-not-in-vlrs');
+    expect(error.name).toBe('WktNotInVlrsError');
+    expect(error.url).toBe('https://host/evlr.copc.laz');
+    expect(error.message).toContain('https://host/evlr.copc.laz');
+    expect(error.message).toContain('extended VLR');
+    // Two ways forward, and the message has to offer both.
+    expect(error.message).toContain('pdal translate');
+    expect(error.message).toContain('open an issue');
   });
 });

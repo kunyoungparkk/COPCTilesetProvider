@@ -128,6 +128,8 @@ export interface RangeStats {
 }
 
 export interface RangeReader {
+  /** The file this reader reads. Errors name it, and a reader serves exactly one. */
+  readonly url: string;
   read(range: ByteRange, signal?: AbortSignal): Promise<RangeRead>;
   /**
    * Reads several ranges, merging neighbours into shared requests.
@@ -346,5 +348,5 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     return { ...counters };
   }
 
-  return { read, readMany, stats };
+  return { url, read, readMany, stats };
 }

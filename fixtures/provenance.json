@@ -1,0 +1,47 @@
+{
+  "source": "https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz",
+  "totalBytes": 81123042,
+  "etag": "\"dbb36ebb301306feb94c5e313524492c-10\"",
+  "cut": {
+    "autzen-head.bin": {
+      "offset": 0,
+      "length": 589,
+      "sha256": "784841800b5b03619ee3b568f9ff5ac407e1ddff46ba317048597d938401063d",
+      "why": "Decision 4's first read: LAS header + COPC info VLR"
+    },
+    "autzen-vlrs.bin": {
+      "offset": 375,
+      "length": 1361,
+      "sha256": "d696b7b86708050f3f2bd02f36a0c9e77f4e6c2d45309fd1d662e2d0a33e7297",
+      "why": "the VLR region, where the WKT record lives"
+    },
+    "autzen-root-hierarchy.bin": {
+      "offset": 81114146,
+      "length": 8896,
+      "sha256": "b937e87a8b7b9d7e62bff0e431d349a4d84709fd60c1cfcd3e4dc863253c4d53",
+      "why": "the root hierarchy page"
+    }
+  },
+  "observed": {
+    "headerLength": 375,
+    "pointDataOffset": 1736,
+    "vlrCount": 3,
+    "pointDataRecordFormat": 7,
+    "pointCount": 10653336,
+    "cube": [
+      635577.79,
+      848882.15,
+      406.1400000000003,
+      640233.3,
+      853537.66,
+      5061.65000000001
+    ],
+    "spacing": 36.37117187500007,
+    "rootHierarchyPage": {
+      "pageOffset": 81114146,
+      "pageLength": 8896
+    },
+    "nodeCount": 278,
+    "subPageCount": 0
+  }
+}
