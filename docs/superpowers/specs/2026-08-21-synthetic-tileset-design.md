@@ -124,30 +124,51 @@ empty-node rule arriving from the other direction.
 invention of this design: *"no point data exists for this key, though may exist
 for child entries."*
 
-**Empty nodes are represented, not omitted.** That removes the case this design
-briefly tried to accommodate — a writer that skips empty nodes and thereby
-leaves a child with no parent in the page. The format's answer to an empty node
-is an entry with `pointCount` 0, so an absent parent is not the ordinary
-consequence of a sparse cloud.
+**Empty nodes are represented, not omitted.** A sparse cloud is therefore not a
+reason for a page to have gaps — the format's answer to an empty node is an
+entry with `pointCount` 0. A gap is something else, and is handled below.
 
-### Contradictions and gaps are both refused
+### The boundary: refuse a malformed file, tolerate an incomplete tree
 
-**A key is a node or a page pointer, never both** within one page. The two
-meanings are alternatives of one `pointCount` field, so an overlap means two
-entries disagree about where that node's data is, and nothing here can choose.
+**A format violation is still a `MalformedHierarchyError`; synthesis applies
+only to a valid but incomplete tree.**
 
-**An entry whose parent is absent from the page** cannot be placed in the tree.
-The specification does not require the hierarchy to be a complete tree, but it
-does not license a gap either, and it supplies `pointCount` 0 for the one case
-that would otherwise produce one. With no normative basis and no observed writer
-that does it, synthesising an ancestor would mean inventing a tile out of a
-guess about what the file meant.
+Two things are format violations and raise it, as before — the error already
+blames the file and names the offending entry.
 
-**An entry outside the subtree rooted at `rootKey`** belongs to a different
-page.
+- **A key that is both a node and a page pointer** within one page. The two are
+  alternatives of a single `pointCount` field, so an overlap means two entries
+  disagree about where that node's data lives, and nothing here can choose.
+- **An entry outside the subtree rooted at `rootKey`.** It belongs to a
+  different page; placing it here would put a node under an ancestor that is not
+  its own.
 
-All three raise `MalformedHierarchyError`, which already blames the file and
-names the offending entry.
+**An entry whose parent is absent from the page** is neither. The specification
+requires the hierarchy to let a reader locate a node's points; it does not
+require every ancestor to carry an entry of its own, and a missing ancestor
+takes nothing away from the descendants that do. A node's cube, and therefore
+its region and geometric error, follow from its key alone, so the ancestor can
+be rebuilt exactly rather than guessed at.
+
+The gap is filled with **skeleton tiles: no `content`, no registry entry, no
+byte range** — only the boundingVolume and geometricError its key determines.
+That is the same shape a `pointCount` 0 entry produces, which the specification
+describes as ordinary.
+
+**Basis, stated plainly for whoever reads this next.** The specification does not
+mandate ancestor entries; that is the whole of the argument. No writer known to
+produce gaps was identified, and the one real file in this repo has none, so the
+synthesis path is justified by what the format permits rather than by observed
+behaviour. If a writer is later found to depend on it, cite it here.
+
+**Synthesis is observable.** `SyntheticTileset` carries a
+`synthesizedAncestors` count, so a file that needs it says so instead of being
+silently repaired. Its definition is exact and is the one thing to get right:
+**the number of ancestor tiles this call synthesised** — a count of tiles, not
+of files and not of the gaps that caused them, since one gap of several levels
+produces several tiles. (`requestsSaved` in the transport was ambiguous in
+exactly this way and had to be pinned down; the same ambiguity is not worth
+repeating.)
 
 ## The numbers
 
@@ -257,7 +278,9 @@ arithmetic and therefore agrees with it whatever it does. Three defences:
    no `content` wherever `pointCount` is 0; every content URI absolute; and the
    registry's key set exactly equal to the set of content URIs in the JSON — if
    those two drift, a tile is requested that nothing can answer, or a range is
-   held that nothing will ask for.
+   held that nothing will ask for. Skeleton tiles appear in neither set, and
+   `synthesizedAncestors` equals the number of tiles that carry no content and
+   had no entry of their own.
 
 ### What the fixture can and cannot show
 
@@ -269,7 +292,8 @@ tree of pages, but SHALL always consist of at least ONE hierarchy page."*
 
 So the fixture exercises the node path, the depth arithmetic, and the region
 maths against real coordinates — and it cannot reach the page-pointer branch,
-the empty-node branch, or any of the three refusals, because
+the empty-node branch, the synthesised-ancestor branch, or either refusal,
+because
 the one real page we have contains no instance of any of them.
 
 Those branches are tested against hand-built pages, and each such test says in
@@ -295,5 +319,7 @@ for sub-project 8.
   interceptor is handed.
 - **`toWgs84(x, y, z)` is the only change to `src/crs`.**
 - **`Bounds.stepTo` is used rather than reimplemented.**
-- **A gap and a contradiction are both refused.** The specification represents
-  empty nodes rather than omitting them, so neither has a benign reading.
+- **A malformed file is refused; an incomplete tree is completed.** A key that
+  is both node and page pointer, or an entry outside the page's subtree, raises
+  `MalformedHierarchyError`. A missing ancestor becomes a skeleton tile and is
+  counted in `synthesizedAncestors`.
