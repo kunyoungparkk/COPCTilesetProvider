@@ -1,8 +1,5 @@
 import proj4 from 'proj4';
-import { CrsCodeNotFoundError, CrsNotRegisteredError } from '../errors/index.js';
 import { geodeticToEcef } from './ecef.js';
-import { findHorizontalEpsgCode } from './horizontal-code.js';
-import { definitionFor } from './registry.js';
 
 // Restated rather than read out of the registry: 4326 is registered as a
 // convenience the caller may replace, and where these coordinates end up is not
@@ -50,25 +47,23 @@ function metresPerUnit(definition: string): number {
 /**
  * Builds the transform from a file's coordinates to ECEF.
  *
- * Decision 6 fixes this order: read the horizontal code out of the WKT, resolve
- * it against the registry, and hand proj4 a *definition* — never the WKT
- * itself, which goes quietly wrong on compound systems. OVERVIEW §6 keeps heights
- * ellipsoidal — that is a datum offset, not a unit — so z is scaled into metres
- * and otherwise passes through the projection untouched.
+ * Takes a proj4 definition rather than the file's WKT, which is Decision 6's
+ * order split across Decision 3's realm boundary: `resolveCrsDefinition` reads
+ * the WKT and consults the registry on the main thread, and only its answer is
+ * posted here. Nothing in this file reaches for the registry, and `worker.ts`
+ * is the entry point that keeps it that way — a rule about imports would not,
+ * so `tests/crs-worker-boundary.test.ts` walks what that entry can reach.
+ *
+ * Whole WKT still never reaches proj4. The reason is that which dialects a
+ * given proj4 build parses is not predictable, while a registered definition
+ * is the one input someone vouched for. (Measured on the pinned file: feeding
+ * its compound WKT to proj4 throws, and feeding its PROJCS subtree alone
+ * projects correctly — so what is at stake here is unpredictability.)
+ *
+ * OVERVIEW §6 keeps heights ellipsoidal — a datum offset, not a unit — so z is
+ * scaled into metres and otherwise passes through the projection untouched.
  */
-export function createTransform(wkt: string | undefined): CrsTransform {
-  // A file with no WKT at all fails the same way as one whose WKT names no
-  // system: either way nobody said which system these coordinates are in.
-  const code = wkt === undefined ? null : findHorizontalEpsgCode(wkt);
-  if (code === null) {
-    throw new CrsCodeNotFoundError();
-  }
-
-  const definition = definitionFor(code);
-  if (definition === undefined) {
-    throw new CrsNotRegisteredError(code);
-  }
-
+export function createTransformFromDefinition(definition: string): CrsTransform {
   const toWgs84 = proj4(definition, WGS84);
   const metresPerZ = metresPerUnit(definition);
 

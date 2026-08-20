@@ -2,10 +2,10 @@
  * Finds the EPSG code of the file's horizontal coordinate system.
  *
  * Decision 6 extracts a code and resolves it against a registry rather than
- * handing whole WKT to proj4, because compound systems and dialects go quietly
- * wrong that way. The pinned Autzen file shows how quietly: it carries ten
- * AUTHORITY nodes, and the horizontal one is neither the first (a spheroid)
- * nor the last (a vertical datum).
+ * handing whole WKT to proj4, which is unpredictable across compound systems
+ * and dialects. The pinned Autzen file shows the shape of the problem: it
+ * carries ten AUTHORITY nodes, and the horizontal one is neither the first (a
+ * spheroid) nor the last (a vertical datum).
  *
  * The rule is therefore structural — the authority that is a *direct child* of
  * the horizontal system — which needs bracket depth, not pattern matching.

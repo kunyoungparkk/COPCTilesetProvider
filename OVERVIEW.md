@@ -96,7 +96,9 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
   우리 구조에선 분류 필터가 GPU 스타일 단계라 0점 디코드 자체가 나올 수 없다.
   나오면 정책 문제가 아니라 버그이므로 typed error로 시끄럽게 실패한다.
 - **CRS = 내부 Map으로 관리. 기본 등록은 EPSG:4326 하나.** 파일 WKT에서 EPSG AUTHORITY 코드만 추출해 CRS Map에서 찾고, 변환에는 CRS Map의 proj4 정의를 쓴다.
-  WKT 전문을 proj4에 직접 먹이지 않는다(compound CRS·방언에서 조용히 틀리는 경로).
+  WKT 전문을 proj4에 직접 먹이지 않는다 — 방언에 따라 throw하거나(실측: Autzen compound),
+  datum 정보 누락 시 조용히 틀리거나, 어느 쪽일지 예측할 수 없다. 등록된 정의만이
+  누군가 정확성을 보증한 입력이다.
   - 확장: `registerCrs(code, proj4정의)` 정적 메서드. 등록된 정의의 정확성은
     등록자 책임. 어떤 좌표계가 들어올지 예측할 수 없으므로 부분적 기본 등록
     대신 규칙 하나로 통일한다 — "4326이 아니면 등록".

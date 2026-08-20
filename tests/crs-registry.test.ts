@@ -7,7 +7,8 @@ const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
 
 // The registry is process-wide module state by design, so these tests share it
 // with each other and with every other test file — 2992 in particular is
-// registered by the transform tests, because the pinned fixture's WKT names it.
+// registered by the transform and resolve tests, because the pinned fixture's
+// WKT names it.
 // The default-table test therefore asks about a code nothing anywhere
 // registers, so that it reads the same however vitest is isolating files.
 describe('the CRS registry', () => {
@@ -17,13 +18,13 @@ describe('the CRS registry', () => {
     // Pinned exactly, because this is the only definition the library ships
     // for reading a file's own coordinates: a parseable but wrong one here
     // would misplace every file that resolves through it, and nothing else in
-    // the suite would see it. The one test that transforms through 4326
-    // measures the distance between two points differing only in height — a
-    // quantity identical wherever the horizontal pair lands. (transform.ts
-    // holds a second copy of this string as its fixed WGS84 target. Nothing
-    // pins that copy as a string — the corner test only requires it to agree
-    // with WGS84 to within five metres at Autzen, which every ellipsoid-
-    // compatible datum proj4 can apply without grids does.)
+    // the suite would see it. Since the transform tests take their definitions
+    // literally, the only other place the seed is exercised is the resolve
+    // test that looks 4326 up without registering it. (transform.ts holds a
+    // second copy of this string as its fixed WGS84 target. Nothing pins that
+    // copy as a string — the corner test only requires it to agree with WGS84
+    // to within five metres at Autzen, which every ellipsoid-compatible datum
+    // proj4 can apply without grids does.)
     expect(definitionFor(4326)).toBe('+proj=longlat +datum=WGS84 +no_defs');
     expect(definitionFor(32_633)).toBeUndefined();
   });
