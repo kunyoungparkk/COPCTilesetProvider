@@ -1,4 +1,5 @@
 export { CopcTilesetError } from './base.js';
+export { LeaseAlreadyReleasedError } from './budget.js';
 export {
   MalformedHierarchyError,
   NotCopcError,

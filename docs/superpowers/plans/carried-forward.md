@@ -71,6 +71,28 @@ rediscovered. Delete an entry when the work lands.
   Deleting this entry without carrying the measurement into the implementing
   code loses the evidence for why the check exists.
 
+## For the range sub-project
+
+- **Link `readMany`'s coalesced group requests under one `AbortController`.**
+  They currently run under an unlinked `Promise.all` (`src/range/range-reader.ts`,
+  the `readMany` function, `await Promise.all(...)` around line 330): when one
+  group fails fatally, the caller's promise rejects but its siblings keep
+  going. The budget design doc (`docs/superpowers/specs/2026-08-21-budget-design.md`,
+  "Prerequisite" section) measured a sibling answered 503 running its full §7
+  retry ladder — two further requests over 2.5 s — after the caller had
+  already been given the error, incrementing the reader's cumulative counters
+  while doing it. The fix is a linked `AbortController` inside `readMany`: a
+  fatal group failure aborts its siblings, the caller still sees the original
+  error, and the siblings end silently. It has to land before a budget lease
+  can be held around a `readMany` call (`src/budget/`), because work that
+  outlives the call has no moment at which its lease could be returned — that
+  dependency is the budget module's whole reason for naming this, not
+  something the budget module fixes itself. The only prior trace of this
+  defect anywhere in the repo was a parenthetical in a test comment
+  (`tests/range-reader.test.ts`, around the "Promise.all rejects as soon as
+  one group does" comment near line 618); this entry is the record the design
+  doc's own "Prerequisite" section observed did not exist.
+
 ## For whichever sub-project first ships a root README
 
 - **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
