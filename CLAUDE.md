@@ -41,6 +41,8 @@ Every artifact must be reviewable and continuable by a stranger:
   back to the relevant OVERVIEW decision (e.g. `// Decision 4: no 200 fallback`).
 - The maintainer must be able to explain every merged line. Code that can't
   be explained doesn't get merged — simplify or reject.
+- Write what a test catches only after running the mutation that decides it.
+- Comments state what is true now; how it came to be wrong goes in the commit body.
 
 ## Language
 
