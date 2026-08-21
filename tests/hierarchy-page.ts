@@ -14,6 +14,11 @@ export interface PageEntryBytes {
 
 const ENTRY_BYTES = 32;
 
+// A bound big enough that no constructed page trips it by accident. Tests
+// about the bound itself pass their own; this default keeps the other callers
+// from having to state a number their case is not about.
+const CONSTRUCTED_FILE_POINTS = 1_000_000;
+
 /**
  * Encodes entries as COPC 1.0 hierarchy bytes.
  *
@@ -51,7 +56,10 @@ export function encodeHierarchyPage(entries: readonly PageEntryBytes[]): Uint8Ar
  * `ByteRange` `readHierarchyPage` asks for, so this does not check that the
  * range itself is correct — `tests/copc-hierarchy.test.ts` pins that.
  */
-export function hierarchyPageOf(entries: readonly PageEntryBytes[]): Promise<HierarchyPage> {
+export function hierarchyPageOf(
+  entries: readonly PageEntryBytes[],
+  filePointCount = CONSTRUCTED_FILE_POINTS,
+): Promise<HierarchyPage> {
   const bytes = encodeHierarchyPage(entries);
   const reader = {
     url: 'https://host/constructed.copc.laz',
@@ -66,5 +74,5 @@ export function hierarchyPageOf(entries: readonly PageEntryBytes[]): Promise<Hie
     }),
   };
 
-  return readHierarchyPage(reader, { offset: 0, length: bytes.byteLength });
+  return readHierarchyPage(reader, { offset: 0, length: bytes.byteLength }, filePointCount);
 }

@@ -158,7 +158,12 @@ describe('buildTileset', () => {
       readMany: () => Promise.reject(new Error('unused')),
       stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
     };
-    const page = await readHierarchyPage(reader, { offset: 0, length: bytes.byteLength });
+    const page = await readHierarchyPage(
+      reader,
+      { offset: 0, length: bytes.byteLength },
+      // Above every constructed entry below; this test is not about the bound.
+      1_000_000,
+    );
 
     const context = await contextFor(transform);
     const { json, entries, synthesizedAncestors } = buildTileset(page, context);

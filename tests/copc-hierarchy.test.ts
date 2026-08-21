@@ -10,6 +10,13 @@ const ROOT = new Uint8Array(
 );
 const ROOT_PAGE = { offset: 81_114_146, length: 8896 };
 
+/** Autzen's own header count, read from `fixtures/autzen-head.bin` (uint64 at 247). */
+const AUTZEN_POINTS = 10_653_336;
+
+// Bound for the constructed pages below, whose entries are small by
+// construction. Only the tests that are about the bound itself pass their own.
+const FILE_POINTS = 1_000_000;
+
 function pageReader(page: Uint8Array, at: number) {
   const reads: ByteRange[] = [];
   const reader: RangeReader = {
@@ -32,7 +39,7 @@ describe('readHierarchyPage against the pinned root page', () => {
   it('reads exactly the range the info VLR reported', async () => {
     const { reader, reads } = pageReader(ROOT, ROOT_PAGE.offset);
 
-    await readHierarchyPage(reader, ROOT_PAGE);
+    await readHierarchyPage(reader, ROOT_PAGE, AUTZEN_POINTS);
 
     expect(reads).toEqual([{ offset: 81_114_146, length: 8896 }]);
   });
@@ -40,7 +47,7 @@ describe('readHierarchyPage against the pinned root page', () => {
   it('finds every node Autzen puts in its root page', async () => {
     const { reader } = pageReader(ROOT, ROOT_PAGE.offset);
 
-    const { nodes, pages } = await readHierarchyPage(reader, ROOT_PAGE);
+    const { nodes, pages } = await readHierarchyPage(reader, ROOT_PAGE, AUTZEN_POINTS);
 
     expect(nodes).toHaveLength(278);
     // Autzen's whole hierarchy fits in one page, which is why the sub-page
@@ -51,7 +58,7 @@ describe('readHierarchyPage against the pinned root page', () => {
   it('describes the root node with byte-range vocabulary', async () => {
     const { reader } = pageReader(ROOT, ROOT_PAGE.offset);
 
-    const { nodes } = await readHierarchyPage(reader, ROOT_PAGE);
+    const { nodes } = await readHierarchyPage(reader, ROOT_PAGE, AUTZEN_POINTS);
     const root = nodes.find((node) => node.key.depth === 0);
 
     expect(root?.key).toEqual({ depth: 0, x: 0, y: 0, z: 0 });
@@ -64,7 +71,7 @@ describe('readHierarchyPage against the pinned root page', () => {
     const read = vi.fn().mockRejectedValue(new Error('should not resolve'));
     const reader = { url: 'https://host/autzen.copc.laz', read } as unknown as RangeReader;
 
-    await expect(readHierarchyPage(reader, ROOT_PAGE, controller.signal)).rejects.toThrow();
+    await expect(readHierarchyPage(reader, ROOT_PAGE, AUTZEN_POINTS, controller.signal)).rejects.toThrow();
     expect(read).toHaveBeenCalledWith({ offset: 81_114_146, length: 8896 }, controller.signal);
   });
 });
@@ -78,10 +85,11 @@ describe('readHierarchyPage against synthetic pages', () => {
     ]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes, pages } = await readHierarchyPage(reader, {
-      offset: 0,
-      length: page.length,
-    });
+    const { nodes, pages } = await readHierarchyPage(
+      reader,
+      { offset: 0, length: page.length },
+      FILE_POINTS,
+    );
 
     expect(nodes).toEqual([
       { key: { depth: 0, x: 0, y: 0, z: 0 }, offset: 1000, length: 200, pointCount: 50 },
@@ -97,36 +105,83 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [2, 1, 1, 0], offset: 0, byteSize: 0, pointCount: 0 }]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length });
+    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     expect(nodes).toEqual([
       { key: { depth: 2, x: 1, y: 1, z: 0 }, offset: 0, length: 0, pointCount: 0 },
     ]);
   });
 
-  // The direction this pins alongside the case above: pointCount > 0 implies
-  // length > 0. Left unchecked, this entry becomes a NodeDescriptor with a
-  // byte range nobody can request, and dies one layer down in
-  // formatRangeHeader as InvalidByteRangeError — blaming how the request was
-  // built for a defect that is in the file, exactly what checkedLength's own
-  // comment says must not happen. The converse (pointCount === 0 implies
-  // length === 0) is not enforced or pinned here — see carried-forward.md.
+  // One direction of the spec's rule: pointCount > 0 implies length > 0. Left
+  // unchecked, this entry becomes a NodeDescriptor with a byte range nobody
+  // can request, and dies one layer down in formatRangeHeader as
+  // InvalidByteRangeError — blaming how the request was built for a defect
+  // that is in the file, exactly what checkedLength's own comment says must
+  // not happen.
   it('refuses a node that claims points but no bytes', async () => {
     const page = buildPage([{ key: [4, 1, 2, 3], offset: 4096, byteSize: 0, pointCount: 5 }]);
     const { reader } = pageReader(page, 0);
 
-    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('4-1-2-3');
     await expect(failure).rejects.toThrow('declares 5 points');
   });
 
+  // The other direction. The COPC specification documents `Entry::byteSize` as
+  // "0 if the pointCount is 0" (copc.io, hierarchy VLR section), so bytes
+  // reserved for a node that holds nothing is the file contradicting itself.
+  // Nothing downstream would notice: Decision 6 omits content for every
+  // zero-point node whatever its length says, so these bytes are silently
+  // dropped rather than read, and whatever the file meant to put there never
+  // reaches anyone.
+  it('refuses a node that declares no points but reserves bytes', async () => {
+    const page = buildPage([{ key: [3, 0, 1, 1], offset: 2048, byteSize: 500, pointCount: 0 }]);
+    const { reader } = pageReader(page, 0);
+
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('3-0-1-1');
+    await expect(failure).rejects.toThrow('500');
+  });
+
+  // A node's points are a subset of the file's, so the header's own count is
+  // an upper bound the file already carries. Unbounded, this field is what
+  // decideChunk's laz-perf call allocates from: measured on the 951-byte
+  // 47-point chunk fixture, a claim of 1_000_000 fabricates a million points
+  // in about half a second, and copc.js reads the field as Int32 so a page can
+  // ask for 2_147_483_647. Refusing it here blames the file, one layer above
+  // the RangeError a dependency would otherwise throw.
+  it('refuses a node that claims more points than the file holds', async () => {
+    const page = buildPage([{ key: [2, 1, 0, 1], offset: 4096, byteSize: 512, pointCount: 1001 }]);
+    const { reader } = pageReader(page, 0);
+
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, 1000);
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('2-1-0-1');
+    await expect(failure).rejects.toThrow('1001');
+    await expect(failure).rejects.toThrow('1000');
+  });
+
+  // The bound is the file's count, not one less: a single-node octree holds
+  // every point the file has. Off by one here would refuse a conformant file.
+  it('admits a node holding every point the file has', async () => {
+    const page = buildPage([{ key: [0, 0, 0, 0], offset: 4096, byteSize: 512, pointCount: 1000 }]);
+    const { reader } = pageReader(page, 0);
+
+    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length }, 1000);
+
+    expect(nodes[0]?.pointCount).toBe(1000);
+  });
+
   it('reads a deep key on every axis', async () => {
     const page = buildPage([{ key: [7, 96, 41, 12], offset: 10, byteSize: 20, pointCount: 30 }]);
     const { reader } = pageReader(page, 0);
 
-    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length });
+    const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     expect(nodes[0]?.key).toEqual({ depth: 7, x: 96, y: 41, z: 12 });
   });
@@ -134,7 +189,7 @@ describe('readHierarchyPage against synthetic pages', () => {
   it('reports an empty page as no nodes rather than failing', async () => {
     const { reader } = pageReader(new Uint8Array(0), 0);
 
-    expect(await readHierarchyPage(reader, { offset: 0, length: 0 })).toEqual({
+    expect(await readHierarchyPage(reader, { offset: 0, length: 0 }, FILE_POINTS)).toEqual({
       nodes: [],
       pages: [],
     });
@@ -146,7 +201,7 @@ describe('readHierarchyPage against synthetic pages', () => {
   it('asks for nothing when the page is empty', async () => {
     const { reader, reads } = pageReader(new Uint8Array(0), 0);
 
-    await readHierarchyPage(reader, { offset: 0, length: 0 });
+    await readHierarchyPage(reader, { offset: 0, length: 0 }, FILE_POINTS);
 
     expect(reads).toEqual([]);
   });
@@ -158,7 +213,7 @@ describe('readHierarchyPage against synthetic pages', () => {
   it('reports a page that is not a whole number of entries', async () => {
     const { reader } = pageReader(new Uint8Array(31), 0);
 
-    const error = await readHierarchyPage(reader, { offset: 0, length: 31 }).then(
+    const error = await readHierarchyPage(reader, { offset: 0, length: 31 }, FILE_POINTS).then(
       () => undefined,
       (thrown: Error) => thrown,
     );
@@ -177,10 +232,11 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [0, 0, 0, 0], offset: 100, byteSize: 10, pointCount: -2 }]);
     const { reader } = pageReader(page, 0);
 
-    const error = await readHierarchyPage(reader, {
-      offset: 0,
-      length: page.length,
-    }).then(
+    const error = await readHierarchyPage(
+      reader,
+      { offset: 0, length: page.length },
+      FILE_POINTS,
+    ).then(
       () => undefined,
       (thrown: Error) => thrown,
     );
@@ -198,7 +254,7 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [1, -2, 3, 4], offset: 100, byteSize: 10, pointCount: 5 }]);
     const { reader } = pageReader(page, 0);
 
-    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     // Decision 6: a page holds hundreds of entries, so naming the one that
@@ -217,7 +273,7 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [3, 1, 2, 0], offset: 100, byteSize: -8, pointCount: 5 }]);
     const { reader } = pageReader(page, 0);
 
-    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('3-1-2-0');
@@ -229,7 +285,7 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [1, 0, 1, 0], offset: 5000, byteSize: -1, pointCount: -1 }]);
     const { reader } = pageReader(page, 0);
 
-    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('1-0-1-0');
@@ -246,7 +302,7 @@ describe('readHierarchyPage against synthetic pages', () => {
     const page = buildPage([{ key: [1, 0, 1, 0], offset: 5000, byteSize: 0, pointCount: -1 }]);
     const { reader } = pageReader(page, 0);
 
-    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length }, FILE_POINTS);
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('1-0-1-0');
@@ -267,13 +323,13 @@ describe('descriptors as byte ranges', () => {
     ]);
     const { reader } = pageReader(page, 0);
 
-    const [sub] = (await readHierarchyPage(reader, { offset: 0, length: 32 })).pages;
+    const [sub] = (await readHierarchyPage(reader, { offset: 0, length: 32 }, FILE_POINTS)).pages;
     if (sub === undefined) {
       throw new Error('the page under test declares one sub-page');
     }
 
     // A PageDescriptor where a ByteRange is expected, with no field renaming.
-    const { nodes } = await readHierarchyPage(reader, sub);
+    const { nodes } = await readHierarchyPage(reader, sub, FILE_POINTS);
     expect(nodes).toHaveLength(1);
 
     // And a NodeDescriptor[] where readonly ByteRange[] is expected, which is

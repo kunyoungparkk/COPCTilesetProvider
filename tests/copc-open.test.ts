@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { encodeHierarchyPage } from './hierarchy-page.js';
 import { openCopc } from '../src/copc/index.js';
 import type { ByteRange, RangeReader } from '../src/range/index.js';
 
@@ -126,6 +127,39 @@ describe('openCopc', () => {
       { offset: 0, length: 589 },
       { offset: 375, length: 1361 },
     ]);
+  });
+
+  // The bound readHierarchyPage applies is only as good as the number this
+  // function hands it, and passing the wrong one is invisible from inside
+  // that function: it would still refuse something, just never the entries
+  // that matter. So this serves the real header and VLRs — the header says
+  // 10,653,336 points — with a root page whose first entry claims one more,
+  // and pins that opening the file fails. Mutating `header.pointCount` here
+  // to any larger constant reddens this and nothing else.
+  it('bounds the hierarchy by the point count its own header reported', async () => {
+    const entry = encodeHierarchyPage([
+      { key: [1, 0, 0, 0], offset: 4096, byteSize: 512, pointCount: 10_653_337 },
+    ]);
+    // The info VLR fixes the root page at 8896 bytes, so the constructed page
+    // has to be that long. Trailing zeros parse as one empty node keyed
+    // 0-0-0-0, which is legal — hence the 1-0-0-0 key above, so the entry
+    // under test is not the one those zeros collapse into.
+    const page = new Uint8Array(8896);
+    page.set(entry, 0);
+    const { reader } = autzenReader();
+    const served: RangeReader = {
+      ...reader,
+      read: (range, signal) =>
+        range.offset === 81_114_146
+          ? Promise.resolve({ bytes: page.buffer.slice(0) as ArrayBuffer, totalBytes: 81_123_042 })
+          : reader.read(range, signal),
+    };
+
+    const failure = openCopc(served);
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('10653337');
+    await expect(failure).rejects.toThrow('10653336');
   });
 
   // Each of the three readers has this test for its own single read. The

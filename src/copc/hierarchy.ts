@@ -69,20 +69,54 @@ function checkedLength(url: string, key: string, length: number): number {
   return length;
 }
 
-// The direction this enforces: pointCount > 0 implies length > 0. A
-// zero-point node legitimately has offset 0, length 0 (the COPC spec says
-// so, and checkedLength above must admit that zero). But a node that claims
-// points with no bytes to hold them is the same wrong-blame shape checkedLength
-// exists to prevent one value over: left alone it becomes a NodeDescriptor
-// whose byte range nobody can request, and dies in formatRangeHeader as
-// InvalidByteRangeError instead of naming the file as the defect's source.
-// The converse (pointCount === 0 implies length === 0, per the spec's "0 if
-// the pointCount is 0") is not enforced here — see carried-forward.md.
-function checkedPointCount(url: string, key: string, pointCount: number, length: number): number {
+// Three things a node's point count has to agree with, all of them defects
+// the file is responsible for.
+//
+// The first two are the COPC specification's own rule that `Entry::byteSize`
+// is "0 if the pointCount is 0" (copc.io, hierarchy VLR section), read in both
+// directions. Points with no bytes to hold them is the wrong-blame shape
+// checkedLength exists to prevent, one value over: left alone it becomes a
+// NodeDescriptor whose byte range nobody can request, and dies in
+// formatRangeHeader as InvalidByteRangeError instead of naming the file.
+// Bytes reserved for a node holding nothing is the same contradiction the
+// other way round, and nothing downstream would ever notice it — Decision 6
+// omits content for every zero-point node whatever its length says, so those
+// bytes are dropped in silence.
+//
+// The third is magnitude. A node's points are a subset of the file's, so the
+// header's own count bounds every entry. Nobody else bounds it: `decodeChunk`
+// hands this number straight to laz-perf, which allocates
+// `pointCount * pointDataRecordLength` bytes and fabricates that many points
+// from whatever the chunk holds. Measured against the 951-byte, 47-point
+// chunk fixture: a claim of 1_000_000 produces a million points in about half
+// a second, and copc.js reads the field as a signed Int32, so a page can ask
+// for 2_147_483_647 — an allocation V8 refuses with a bare RangeError from
+// inside a dependency. Refusing it here costs one comparison and blames the
+// file, which is the only thing that can be at fault.
+function checkedPointCount(
+  url: string,
+  key: string,
+  pointCount: number,
+  length: number,
+  filePointCount: number,
+): number {
   if (pointCount > 0 && length === 0) {
     throw new MalformedHierarchyError(
       url,
       `its entry ${JSON.stringify(key)} declares ${pointCount} points but a byte length of 0`,
+    );
+  }
+  if (pointCount === 0 && length > 0) {
+    throw new MalformedHierarchyError(
+      url,
+      `its entry ${JSON.stringify(key)} declares no points but reserves ${length} bytes for them`,
+    );
+  }
+  if (pointCount > filePointCount) {
+    throw new MalformedHierarchyError(
+      url,
+      `its entry ${JSON.stringify(key)} declares ${pointCount} points, more than the ` +
+        `${filePointCount} the file's own header says it holds`,
     );
   }
   return pointCount;
@@ -95,10 +129,17 @@ function checkedPointCount(url: string, key: string, pointCount: number, length:
  * merging stays the transport's job rather than this module's (Decision 4).
  * Actually coalescing two pages into one request needs `readMany` and a way to
  * hand the resulting buffers back in; both arrive with sub-page expansion.
+ *
+ * `filePointCount` is the file header's own point count, and it is required
+ * rather than optional on purpose: an optional bound defaults to no bound, and
+ * a caller that forgets it gets the unchecked behaviour with nothing to say
+ * so. Making it part of the signature costs every call site a decision and
+ * makes omission a compile error instead of a silent one.
  */
 export async function readHierarchyPage(
   reader: RangeReader,
   page: ByteRange,
+  filePointCount: number,
   signal?: AbortSignal,
 ): Promise<HierarchyPage> {
   // Required, not an optimisation: a zero-length range is refused by
@@ -135,7 +176,13 @@ export async function readHierarchyPage(
         key: parseKey(reader.url, key),
         offset: node.pointDataOffset,
         length,
-        pointCount: checkedPointCount(reader.url, key, node.pointCount, length),
+        pointCount: checkedPointCount(
+          reader.url,
+          key,
+          node.pointCount,
+          length,
+          filePointCount,
+        ),
       },
     ];
   });

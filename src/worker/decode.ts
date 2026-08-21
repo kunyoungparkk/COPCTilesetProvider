@@ -43,8 +43,9 @@ export type DecodeHeader = Pick<
  * not 47 — a `+1` over-claim is systematically invisible to a bounds check,
  * and `+2` and beyond is systematically caught by one. Catching a lying
  * hierarchy is not this function's job: it belongs to whatever reads the
- * hierarchy page (`src/copc/hierarchy.ts` already refuses some malformed
- * shapes there under Decision 6).
+ * hierarchy page, and `src/copc/hierarchy.ts` does it — under Decision 6 it
+ * refuses an entry whose count exceeds the file header's own total, which is
+ * what keeps an absurd number from reaching the allocation below.
  *
  * `decompressChunk` reaches `laz-perf` directly and touches no I/O
  * (`node_modules/copc/lib/las/point-data.js`), so calling it here does not

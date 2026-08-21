@@ -38,10 +38,12 @@ describe('decodeChunk', () => {
     // not the decoder confirming itself — the point-count comparison next
     // is a narrower claim, addressed where it is made.
     const { header, info } = await readFileHeader(bufferReader(fixture('autzen-head.bin')));
-    const page = await readHierarchyPage(bufferReader(fixture('autzen-root-hierarchy.bin')), {
-      offset: 0,
-      length: fixture('autzen-root-hierarchy.bin').byteLength,
-    });
+    const page = await readHierarchyPage(
+      bufferReader(fixture('autzen-root-hierarchy.bin')),
+      { offset: 0, length: fixture('autzen-root-hierarchy.bin').byteLength },
+      // Autzen's own header count (uint64 at byte 247 of fixtures/autzen-head.bin).
+      10_653_336,
+    );
     const entry = page.nodes.find(
       (node) => node.key.depth === 5 && node.key.x === 16 && node.key.y === 3 && node.key.z === 1,
     );

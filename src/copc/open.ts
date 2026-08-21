@@ -58,6 +58,7 @@ export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promi
   const root = await readHierarchyPage(
     reader,
     { offset: info.rootHierarchyPage.pageOffset, length: info.rootHierarchyPage.pageLength },
+    header.pointCount,
     signal,
   );
 

@@ -167,10 +167,12 @@ describe('encodePnts', () => {
     // Same node tests/worker-decode.test.ts and tests/worker-positions.test.ts
     // decode: the file's smallest (47 points, LAS point format 7).
     const { header } = await readFileHeader(bufferReader(fixture('autzen-head.bin')));
-    const page = await readHierarchyPage(bufferReader(fixture('autzen-root-hierarchy.bin')), {
-      offset: 0,
-      length: fixture('autzen-root-hierarchy.bin').byteLength,
-    });
+    const page = await readHierarchyPage(
+      bufferReader(fixture('autzen-root-hierarchy.bin')),
+      { offset: 0, length: fixture('autzen-root-hierarchy.bin').byteLength },
+      // Autzen's own header count (uint64 at byte 247 of fixtures/autzen-head.bin).
+      10_653_336,
+    );
     const entry = page.nodes.find(
       (node) => node.key.depth === 5 && node.key.x === 16 && node.key.y === 3 && node.key.z === 1,
     );

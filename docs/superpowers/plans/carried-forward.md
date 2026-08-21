@@ -31,16 +31,6 @@ rediscovered. Delete an entry when the work lands.
   encodings of the same fact (`src/tileset/build.ts`), so treat the prefix as
   cosmetic or the two will eventually disagree.
 
-- **Enforce the converse of `pointCount > 0 ⟹ length > 0`, and decide where.**
-  `checkedPointCount` (`src/copc/hierarchy.ts`) only checks that direction. The
-  COPC spec's `Entry::byteSize` field is documented as "0 if the pointCount is
-  0" (copc.io, hierarchy VLR section), so `pointCount === 0` with a nonzero
-  length is itself spec-noncompliant. Measured on the shipped code: a node
-  entry `{ pointCount: 0, byteSize: 500 }` is admitted with no error and
-  returned as `{ length: 500, pointCount: 0 }` — the 500 bytes are silently
-  dropped rather than read, since Decision 6 has the tileset omit content for
-  every `pointCount === 0` node regardless of what `length` says.
-
 - **Refuse a point format that carries no colour, at open time.** COPC allows
   point data record formats 6, 7 and 8; only 7 and 8 carry RGB. Nothing in
   `src/` validates the format, so a PDRF-6 file reaches `src/worker/pnts.ts`'s
@@ -58,28 +48,6 @@ rediscovered. Delete an entry when the work lands.
   Nobody has measured what that costs in memory or in picking-texture terms.
   `BATCH_ID` is required for picking (Decision 6), so this is a sizing question,
   not a question of whether to keep it.
-
-- **`pointCount` magnitude is bounded nowhere.** `src/worker/decode.ts`'s doc
-  comment names `src/copc/hierarchy.ts` as the owner, but `checkedPointCount`
-  there (`src/copc/hierarchy.ts`) only enforces `pointCount > 0 ⟹ length > 0`
-  — nothing bounds the magnitude itself. Re-measured on
-  `fixtures/autzen-node-5-16-3-1.bin` (951 bytes, 47 real points):
-  `decodeChunk` asked for 100000 points fabricates them in ~88 ms; asked for
-  1000000, ~513 ms; asked for 2147483647 (`copc.js` reads the field as
-  Int32, so this is the ceiling), it throws `RangeError: Array buffer
-  allocation failed` in ~32 ms — at that size the allocation itself
-  (`pointCount * pointDataRecordLength` bytes) is too large for V8's own
-  typed-array limit to even attempt, not a hang. The range in between (tens
-  of millions of points, gigabytes of fabricated data) was not re-verified
-  here — attempting it risked destabilizing the machine this review ran on
-  — so "hangs and then OOMs" for that range is carried forward as an
-  unconfirmed claim, not a re-measured one. The bound belongs in
-  `readHierarchyPage` beside `checkedLength`, where blame already lands on
-  the file; `DecodeHeader`'s `Pick<>` (`src/worker/decode.ts`) deliberately
-  drops the file's own total `pointCount` (`Las.Header`'s own field,
-  confirmed present in `node_modules/copc/lib/las/header.d.ts`), which is
-  the one cheap upper bound already available. This must close before the
-  pipeline is wired to `fromUrl`.
 
 - **The `>>> 8` colour rule needs an owner.** `src/worker/pnts.ts`'s doc
   comment is right about what the Autzen measurement settles (every
