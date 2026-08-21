@@ -92,6 +92,42 @@ describe('openCopc', () => {
     expect(reads).toEqual([{ offset: 0, length: 589 }]);
   });
 
+  // The COPC spec requires the hierarchy VLR to always consist of at least
+  // one hierarchy page, and an empty octree already has an encoding (one
+  // entry with pointCount 0) — so no conformant file needs this. Left
+  // unrefused, it would reach readHierarchyPage's own zero-length early
+  // return and open successfully with an empty root page, a blank globe with
+  // nothing naming the file as the cause.
+  it('refuses a root hierarchy page with a zero byte length', async () => {
+    const { reader, reads } = autzenReader();
+    const zeroed = new Uint8Array(load('autzen-head.bin'));
+    // Offset 429 is where the info VLR's content starts (`INFO_VLR_HEADER_END`
+    // in src/copc/header.ts); rootHierarchyPage.pageLength is the uint64 at
+    // byte 48 of that content (copc.js's Info.parse), so 429 + 48 = 477.
+    new DataView(zeroed.buffer).setBigUint64(429 + 48, 0n, true);
+    const patched: RangeReader = {
+      ...reader,
+      read: (range, signal) => {
+        if (range.offset === 0) {
+          reads.push(range);
+          return Promise.resolve({ bytes: zeroed.buffer as ArrayBuffer, totalBytes: 81_123_042 });
+        }
+        return reader.read(range, signal);
+      },
+    };
+
+    const failure = openCopc(patched);
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('root hierarchy page with a byte length of 0');
+    // The read that would ask for the (now nonsensical) root page never
+    // happens: openCopc refuses before it is ever built.
+    expect(reads).toEqual([
+      { offset: 0, length: 589 },
+      { offset: 375, length: 1361 },
+    ]);
+  });
+
   // Each of the three readers has this test for its own single read. The
   // signal has to survive every hop, and only a reader that sees all three
   // reads can say so.

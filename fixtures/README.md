@@ -15,6 +15,7 @@ somebody else wrote.
 | `autzen-head.bin` | bytes 0-588 — the LAS header and the COPC info VLR, the single first read Decision 4 mandates |
 | `autzen-vlrs.bin` | the VLR region, where the WKT record lives |
 | `autzen-root-hierarchy.bin` | the root hierarchy page: 278 nodes, no sub-pages |
+| `autzen-node-5-16-3-1.bin` | node `5-16-3-1`'s compressed chunk (47 points, 951 bytes) — the file's smallest, so its decoded numbers can be checked by hand |
 
 Autzen's root page has no sub-pages, so it cannot exercise lazy hierarchy
 expansion. That path is covered by synthetic fixtures built in the tests.

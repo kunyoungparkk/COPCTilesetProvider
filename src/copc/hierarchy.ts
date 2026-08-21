@@ -69,6 +69,25 @@ function checkedLength(url: string, key: string, length: number): number {
   return length;
 }
 
+// The direction this enforces: pointCount > 0 implies length > 0. A
+// zero-point node legitimately has offset 0, length 0 (the COPC spec says
+// so, and checkedLength above must admit that zero). But a node that claims
+// points with no bytes to hold them is the same wrong-blame shape checkedLength
+// exists to prevent one value over: left alone it becomes a NodeDescriptor
+// whose byte range nobody can request, and dies in formatRangeHeader as
+// InvalidByteRangeError instead of naming the file as the defect's source.
+// The converse (pointCount === 0 implies length === 0, per the spec's "0 if
+// the pointCount is 0") is not enforced here — see carried-forward.md.
+function checkedPointCount(url: string, key: string, pointCount: number, length: number): number {
+  if (pointCount > 0 && length === 0) {
+    throw new MalformedHierarchyError(
+      url,
+      `its entry ${JSON.stringify(key)} declares ${pointCount} points but a byte length of 0`,
+    );
+  }
+  return pointCount;
+}
+
 /**
  * Reads one hierarchy page and describes what it holds.
  *
@@ -106,30 +125,46 @@ export async function readHierarchyPage(
     );
   }
 
-  const nodes = Object.entries(subtree.nodes).flatMap<NodeDescriptor>(([key, node]) =>
-    node === undefined
-      ? []
-      : [
-          {
-            key: parseKey(reader.url, key),
-            offset: node.pointDataOffset,
-            length: checkedLength(reader.url, key, node.pointDataLength),
-            pointCount: node.pointCount,
-          },
-        ],
-  );
+  const nodes = Object.entries(subtree.nodes).flatMap<NodeDescriptor>(([key, node]) => {
+    if (node === undefined) {
+      return [];
+    }
+    const length = checkedLength(reader.url, key, node.pointDataLength);
+    return [
+      {
+        key: parseKey(reader.url, key),
+        offset: node.pointDataOffset,
+        length,
+        pointCount: checkedPointCount(reader.url, key, node.pointCount, length),
+      },
+    ];
+  });
 
-  const pages = Object.entries(subtree.pages).flatMap<PageDescriptor>(([key, sub]) =>
-    sub === undefined
-      ? []
-      : [
-          {
-            key: parseKey(reader.url, key),
-            offset: sub.pageOffset,
-            length: checkedLength(reader.url, key, sub.pageLength),
-          },
-        ],
-  );
+  const pages = Object.entries(subtree.pages).flatMap<PageDescriptor>(([key, sub]) => {
+    if (sub === undefined) {
+      return [];
+    }
+    const length = checkedLength(reader.url, key, sub.pageLength);
+    // A page-pointer entry exists only because some node's pointCount was the
+    // sub-page sentinel (-1), claiming "there is a child page here" — unlike a
+    // node's own length, which is legitimately zero for an empty node, a page
+    // has no such case: an empty child page could hold none of the entries
+    // the pointer claims exist. Left unrefused, a caller re-reading this
+    // descriptor would reach the zero-length early return above and get
+    // nothing back rather than a defect naming the file — the same
+    // wrong-blame shape checkedPointCount refuses for nodes, applied to a
+    // page pointer instead (tests/copc-hierarchy.test.ts, "refuses a sub-page
+    // that declares a byte length of zero"). No caller re-reads a
+    // PageDescriptor yet — sub-page expansion (src/tileset/README.md) is not
+    // built in this codebase — so this is the shape a future one would hit.
+    if (length === 0) {
+      throw new MalformedHierarchyError(
+        reader.url,
+        `its entry ${JSON.stringify(key)} points at a page but declares a byte length of 0`,
+      );
+    }
+    return [{ key: parseKey(reader.url, key), offset: sub.pageOffset, length }];
+  });
 
   return { nodes, pages };
 }

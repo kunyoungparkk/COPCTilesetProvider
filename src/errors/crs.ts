@@ -46,3 +46,85 @@ export class CrsNotRegisteredError extends CopcTilesetError {
     this.epsgCode = epsgCode;
   }
 }
+
+/**
+ * A registered proj4 definition depends on state that only exists in the
+ * realm that registered it, and that a Worker never receives (OVERVIEW §3,
+ * Decision 3): `resolveCrsDefinition` hands a Worker the definition string
+ * alone, not the process it ran in.
+ *
+ * Three shapes of that: `'grid-shift'` for a `+nadgrids` grid-shift table (any
+ * value but the self-contained `@null` sentinel), which is loaded into a
+ * process-global table by `proj4.nadgrid` and is not part of the definition
+ * string; `'alias'` for a `proj4.defs` key (`EPSG:2992`, a name nobody but
+ * this realm ever registered) rather than a `+`-parameter string at all;
+ * `'missing-projection'` for a `+`-parameter string that never names a
+ * projection (`+lat_0=41.75 +datum=NAD83`) — this one is not an alias and has
+ * nothing to do with proj4's built-in table, so it gets its own reason rather
+ * than sharing `'alias'`'s message.
+ */
+export class CrsDefinitionUnusableError extends CopcTilesetError {
+  readonly code = 'crs-definition-unusable';
+  readonly definition: string;
+  readonly reason: 'grid-shift' | 'alias' | 'missing-projection';
+
+  constructor(definition: string, reason: 'grid-shift' | 'alias' | 'missing-projection') {
+    super(formatMessage(definition, reason));
+    this.definition = definition;
+    this.reason = reason;
+  }
+}
+
+/**
+ * The alias case's fix is a `registerCrs` call, same as `CrsNotRegisteredError`
+ * — but only when the definition is itself an `EPSG:<code>` string, since
+ * that is the one shape this error sees that already names the code to put in
+ * it. A bare alias like `GOOGLE` has no code to extract, so it gets the prose
+ * form instead.
+ */
+function formatMessage(
+  definition: string,
+  reason: 'grid-shift' | 'alias' | 'missing-projection',
+): string {
+  if (reason === 'grid-shift') {
+    return (
+      `This coordinate system definition carries a \`+nadgrids\` term that ` +
+      `is not the self-contained value \`@null\` — naming a grid-shift table, ` +
+      `or naming none at all:\n\n    ${definition}\n\n` +
+      'A `+nadgrids` term (other than the literal value `@null`) only works where ' +
+      'that grid file has already been loaded with `proj4.nadgrid`, which a Worker ' +
+      'never has done. Replace the definition with an equivalent one that carries ' +
+      'no such `+nadgrids` term.'
+    );
+  }
+
+  if (reason === 'missing-projection') {
+    return (
+      `This coordinate system definition never names a projection:\n\n` +
+      `    ${definition}\n\n` +
+      'Every proj4 parameter string needs a `+proj=<name>` term — this one carries ' +
+      'other parameters but not that one, so proj4 has nothing to build a ' +
+      'projection from. Add the missing `+proj=<name>` term; the definition at ' +
+      'https://epsg.io/<code>, if this coordinate system has an EPSG code, has one.'
+    );
+  }
+
+  const epsgMatch = /^EPSG:(\d+)$/i.exec(definition.trim());
+  const expand = epsgMatch
+    ? `Expand it into its full parameter string and register that instead:\n\n` +
+      `    registerCrs(${epsgMatch[1]}, '<proj4 definition>');\n\n` +
+      `https://epsg.io/${epsgMatch[1]} lists one.`
+    : 'Expand it into its full `+proj=...` parameter string — for an EPSG code, ' +
+      'https://epsg.io/<code> lists one — and register that instead.';
+
+  return (
+    `This coordinate system definition is a name rather than a self-contained ` +
+    `parameter string:\n\n    ${definition}\n\n` +
+    'A bare code or alias like this is not a coordinate system by itself — what ' +
+    'it resolves to depends on whichever proj4 build reads it. Some, like ' +
+    '`WGS84` or `EPSG:3857`, are baked into proj4 itself and could change ' +
+    'between versions; anything else needs its own `proj4.defs` call, which ' +
+    `this library never makes. Either way the string alone does not carry the ` +
+    `definition. ${expand}`
+  );
+}

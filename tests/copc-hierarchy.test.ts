@@ -91,15 +91,35 @@ describe('readHierarchyPage against synthetic pages', () => {
 
   // Decision 6 makes the tileset omit content for these rather than encode a
   // zero-point tile. This module reports them honestly and decides nothing.
+  // offset: 0 alongside byteSize: 0 is the spec-conformant shape for a
+  // zero-point entry, not just an arbitrary zero byteSize.
   it('keeps an empty node rather than dropping it', async () => {
-    const page = buildPage([{ key: [2, 1, 1, 0], offset: 900, byteSize: 0, pointCount: 0 }]);
+    const page = buildPage([{ key: [2, 1, 1, 0], offset: 0, byteSize: 0, pointCount: 0 }]);
     const { reader } = pageReader(page, 0);
 
     const { nodes } = await readHierarchyPage(reader, { offset: 0, length: page.length });
 
     expect(nodes).toEqual([
-      { key: { depth: 2, x: 1, y: 1, z: 0 }, offset: 900, length: 0, pointCount: 0 },
+      { key: { depth: 2, x: 1, y: 1, z: 0 }, offset: 0, length: 0, pointCount: 0 },
     ]);
+  });
+
+  // The direction this pins alongside the case above: pointCount > 0 implies
+  // length > 0. Left unchecked, this entry becomes a NodeDescriptor with a
+  // byte range nobody can request, and dies one layer down in
+  // formatRangeHeader as InvalidByteRangeError — blaming how the request was
+  // built for a defect that is in the file, exactly what checkedLength's own
+  // comment says must not happen. The converse (pointCount === 0 implies
+  // length === 0) is not enforced or pinned here — see carried-forward.md.
+  it('refuses a node that claims points but no bytes', async () => {
+    const page = buildPage([{ key: [4, 1, 2, 3], offset: 4096, byteSize: 0, pointCount: 5 }]);
+    const { reader } = pageReader(page, 0);
+
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('4-1-2-3');
+    await expect(failure).rejects.toThrow('declares 5 points');
   });
 
   it('reads a deep key on every axis', async () => {
@@ -213,6 +233,24 @@ describe('readHierarchyPage against synthetic pages', () => {
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('1-0-1-0');
+  });
+
+  // The milder sibling of the points-but-no-bytes node defect: a page-pointer
+  // entry claims "there is a child page here" the same way a node with
+  // pointCount > 0 claims "there is point data here," and a zero-byte page
+  // could not hold whatever the pointer claims exists. Left unrefused, a
+  // future caller re-reading this descriptor would reach the zero-length
+  // early return above and get nothing back — sub-page expansion (the caller
+  // that would do that re-read) is not built in this codebase yet.
+  it('refuses a sub-page that declares a byte length of zero', async () => {
+    const page = buildPage([{ key: [1, 0, 1, 0], offset: 5000, byteSize: 0, pointCount: -1 }]);
+    const { reader } = pageReader(page, 0);
+
+    const failure = readHierarchyPage(reader, { offset: 0, length: page.length });
+
+    await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
+    await expect(failure).rejects.toThrow('1-0-1-0');
+    await expect(failure).rejects.toThrow('points at a page');
   });
 });
 

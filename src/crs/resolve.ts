@@ -16,16 +16,17 @@ import { definitionFor } from './registry.js';
  * builds a transform of its own at `fromUrl` time.
  *
  * Two proj4 features escape that, because they live in realm-global state the
- * string only refers to: a definition naming `+nadgrids` needs a grid table
- * loaded by `proj4.nadgrid`, and one written as a `proj4.defs` alias rather
- * than as parameters needs that alias registered. Measured on proj4 2.21, a
- * realm missing either produces `[NaN, NaN]` with nothing but a console line,
- * or throws a value that is not an Error. Neither is supported in v1, and the
- * check belongs in `createTransformFromDefinition` — the one chokepoint both
- * consumers pass through — rather than at the seam that posts this string:
- * the main thread builds a transform too, so a check there would let the same
- * definition reach Cesium as half-NaN bounding volumes without a throw. The
- * measurement is in `docs/superpowers/plans/carried-forward.md`.
+ * string only refers to: a definition naming `+nadgrids` for anything but the
+ * self-contained `@null` sentinel needs a grid table loaded by
+ * `proj4.nadgrid`, and one written as a `proj4.defs` alias rather than as
+ * parameters needs that alias registered. Measured on proj4 2.21, a realm
+ * missing either produces `[NaN, NaN]` with nothing but a console line, or
+ * throws a value that is not an Error. Neither is supported in v1, and the
+ * check lives in `createTransformFromDefinition` — the one chokepoint both
+ * consumers pass through — rather than at this seam: the main thread builds a
+ * transform too, so a check only here would have let the same definition
+ * reach Cesium as half-NaN bounding volumes without a throw. The measurement
+ * is in the comment above `rejectUnusableDefinition` in `crs/transform.ts`.
  */
 export function resolveCrsDefinition(wkt: string | undefined): string {
   // A file with no WKT at all fails the same way as one whose WKT names no

@@ -3,6 +3,7 @@ import { autzenWkt } from './autzen-wkt.js';
 import { geodeticToEcef, registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
 // The Worker's entry point, imported here the way the Worker will import it.
 import { createTransformFromDefinition } from '../src/crs/worker.js';
+import { CrsDefinitionUnusableError } from '../src/errors/index.js';
 
 const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
@@ -172,5 +173,232 @@ describe('createTransformFromDefinition where there is no usable linear unit', (
     const high = transform.toEcef(637_290.76, 851_209.9, 1000);
 
     expect(metresApart(high, low)).toBeCloseTo(1000, 6);
+  });
+});
+
+describe('createTransformFromDefinition refuses what it cannot carry across a realm', () => {
+  it('refuses a +nadgrids definition instead of returning a transform that answers NaN', () => {
+    // Without this guard, building this transform does not throw at all —
+    // proj4 defers grid lookup to `forward`, so the failure would only show
+    // up later as NaN coordinates and a console line. See the measurement in
+    // `src/crs/transform.ts`, above `rejectUnusableDefinition`.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} +nadgrids=@missing.gsb`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses a proj4.defs alias instead of a self-contained parameter string', () => {
+    // Without this guard, proj4 itself throws here — but a bare string, not
+    // an `Error`, which most catch blocks and every `instanceof Error` check
+    // let through unnoticed.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition('EPSG:2992');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('alias');
+  });
+
+  it('builds a transform for +nadgrids=@null, which is self-contained', () => {
+    // The canonical EPSG:3857 string `global.js` and epsg.io both publish —
+    // `@null` is proj4's own sentinel for "no datum shift", not a table name,
+    // so this must not be refused even though it contains `+nadgrids=`.
+    const EPSG_3857 =
+      '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 ' +
+      '+k=1.0 +units=m +nadgrids=@null +no_defs';
+
+    const transform = createTransformFromDefinition(EPSG_3857);
+    const [longitude, latitude] = transform.toWgs84(-13_580_977, 5_895_835, 0);
+
+    // Measured: no throw, no console line, and real (non-NaN) coordinates —
+    // the opposite of what a missing grid produces.
+    expect(longitude).toBeCloseTo(-121.999_992_123_756_87, 6);
+    expect(latitude).toBeCloseTo(46.715_965_373_686_46, 6);
+  });
+
+  it('refuses @nullisland.gsb, which is not the @null sentinel', () => {
+    // Pins the guard's exact comparison: `nadgrids !== '@null'`, string
+    // equality against the whole value `parseTerms` reads, not a prefix or
+    // substring test. A grid literally named `@nullisland.gsb` shares the
+    // sentinel's first four characters, so a check that only looked at a
+    // prefix (or that failed to trim the term first) would wrongly treat this
+    // as self-contained too.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} +nadgrids=@nullisland.gsb`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses @NULL, which is not the (case-sensitive) @null sentinel', () => {
+    // Pins the value-case rule: `parseTerms` lowercases keys but never
+    // values, matching proj4's own `nadgrids` handler, which does an exact,
+    // case-sensitive `v === '@null'` comparison. Measured directly: proj4
+    // builds `${OREGON} +nadgrids=@NULL` without throwing and then answers
+    // `forward` with `[NaN, NaN]` and a console line naming `'NULL'` — the
+    // same half-NaN escape a missing grid produces. Lowercasing values in
+    // `parseTerms` would make this pass instead of throw, silently
+    // reproducing that escape.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} +nadgrids=@NULL`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses a +nadgrids definition even when it would also fail to build', () => {
+    // Separates the two guards' ordering from each other: this proj4 build
+    // throws its own raw string the moment an unbuildable +proj= reaches it
+    // (measured: `proj4('+proj=notaprojection +nadgrids=@missing.gsb', WGS84)`
+    // throws `'Could not get projection name from: ...'`), so if the
+    // grid-shift check ran after that call it would never get the chance to
+    // run at all — unlike the alias check, whose ordering the test above
+    // already pins.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition('+proj=notaprojection +nadgrids=@missing.gsb');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses +NADGRIDS=, whose uppercase key a substring check would miss', () => {
+    // Before the parse-based rewrite, this built without complaint and only
+    // answered [NaN, NaN] once `forward` ran — the exact half-NaN outcome
+    // this guard exists to abolish. `parseTerms` lowercases the key, so this
+    // is now caught the same as `+nadgrids=@missing.gsb` itself.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} +NADGRIDS=@missing.gsb`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses "+ nadgrids=", whose stray space a substring check would miss', () => {
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} + nadgrids=@missing.gsb`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('refuses a bare +nadgrids with no value, instead of leaking a raw TypeError', () => {
+    // Before the parse-based rewrite, this reached proj4 as
+    // `TypeError: nadgrids.split is not a function` — an accidental Error,
+    // not a typed one. `parseTerms` gives a valueless term `true`, the same
+    // value proj4's own parser gives it, and `true !== '@null'` refuses it
+    // here instead.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition(`${OREGON} +nadgrids`);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('grid-shift');
+  });
+
+  it('builds +PROJ=merc, whose uppercase key a substring check would wrongly refuse', () => {
+    // Before the parse-based rewrite, this was wrongly refused as 'alias',
+    // even though proj4 itself builds and projects it correctly.
+    const EPSG_3857_UPPER =
+      '+PROJ=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 ' +
+      '+k=1.0 +units=m +no_defs';
+
+    const transform = createTransformFromDefinition(EPSG_3857_UPPER);
+    const [longitude, latitude] = transform.toWgs84(-13_580_977, 5_895_835, 0);
+
+    expect(longitude).toBeCloseTo(-121.999_992_123_756_87, 6);
+    expect(latitude).toBeCloseTo(46.715_965_373_686_46, 6);
+  });
+
+  it('builds "+ proj=merc", whose stray space a substring check would wrongly refuse', () => {
+    const EPSG_3857_SPACED =
+      '+ proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 ' +
+      '+k=1.0 +units=m +no_defs';
+
+    const transform = createTransformFromDefinition(EPSG_3857_SPACED);
+    const [longitude, latitude] = transform.toWgs84(-13_580_977, 5_895_835, 0);
+
+    expect(longitude).toBeCloseTo(-121.999_992_123_756_87, 6);
+    expect(latitude).toBeCloseTo(46.715_965_373_686_46, 6);
+  });
+
+  it('builds a repeated +nadgrids= term whose last, safe value wins', () => {
+    // Before the parse-based rewrite, this was wrongly refused: a substring
+    // regex matches the first, unsafe-looking occurrence and never looks
+    // past it. proj4's own `reduce` keeps only the last occurrence of a
+    // repeated key — measured, the combined definition builds and projects
+    // correctly, with no grid ever looked up — and `parseTerms`'s `Map`
+    // overwrites on repeated `set` the same way.
+    const transform = createTransformFromDefinition(
+      `${OREGON} +nadgrids=@missing.gsb +nadgrids=@null`,
+    );
+
+    const [longitude, latitude] = transform.toWgs84(635_577.79, 848_882.15, 0);
+
+    expect(longitude).toBeCloseTo(-123.074_986_74, 6);
+    expect(latitude).toBeCloseTo(44.049_718_82, 6);
+  });
+
+  it('refuses a +-string with no projection term as missing-projection, not alias', () => {
+    // This shape is not an alias, and its failure has nothing to do with
+    // proj4's built-in table or version drift — it is a `+`-parameter string
+    // that simply never names a projection. If this reason were folded back
+    // into 'alias', this assertion would fail.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition('+lat_0=41.75 +datum=NAD83');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('missing-projection');
+  });
+
+  it('reclassifies +init=..., a shape that used to be called an alias', () => {
+    // +init= is an old proj4.js form this build no longer parses at all; its
+    // actual, measured failure (`'Could not get projection name from: ...'`)
+    // is the same missing-projection failure as any other +-string with no
+    // +proj= term, not an unregistered alias.
+    let caught: unknown;
+    try {
+      createTransformFromDefinition('+init=EPSG:2992 +units=ft');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
+    expect((caught as CrsDefinitionUnusableError).reason).toBe('missing-projection');
   });
 });

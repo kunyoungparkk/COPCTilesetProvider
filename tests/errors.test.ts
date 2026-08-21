@@ -3,15 +3,18 @@ import {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
   CopcTilesetError,
+  CrsDefinitionUnusableError,
   InvalidByteRangeError,
   MalformedHierarchyError,
   NotCopcError,
+  PositionCountMismatchError,
   RangeNetworkError,
   RangeRequestFailedError,
   RangeTimeoutError,
   RangeUnsupportedError,
   UnsupportedHeaderLayoutError,
   WktNotInVlrsError,
+  ZeroPointChunkError,
 } from '../src/errors/index.js';
 
 // Decision 6 makes these messages API: a caller who reads one should know what
@@ -172,6 +175,122 @@ describe('UnsupportedHeaderLayoutError', () => {
     expect(error.message).toContain('375');
     // No option a caller can pass makes a 227-byte header readable.
     expect(error.message).toContain('PDAL');
+  });
+});
+
+describe('CrsDefinitionUnusableError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new CrsDefinitionUnusableError('+proj=lcc +nadgrids=@missing.gsb', 'grid-shift');
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('crs-definition-unusable');
+    expect(error.name).toBe('CrsDefinitionUnusableError');
+    expect(error.reason).toBe('grid-shift');
+    expect(error.definition).toBe('+proj=lcc +nadgrids=@missing.gsb');
+  });
+
+  it('tells a grid-shift definition to stand on its own', () => {
+    const message = new CrsDefinitionUnusableError(
+      '+proj=lcc +nadgrids=@missing.gsb',
+      'grid-shift',
+    ).message;
+
+    expect(message).toContain('+proj=lcc +nadgrids=@missing.gsb');
+    expect(message).toContain('+nadgrids');
+    expect(message).toContain('Replace');
+  });
+
+  it('tells an alias to be expanded into parameters', () => {
+    const message = new CrsDefinitionUnusableError('EPSG:9999', 'alias').message;
+
+    expect(message).toContain('EPSG:9999');
+    expect(message).toContain('Expand');
+  });
+
+  it('hands over a runnable registerCrs call for a bare EPSG code, like its sibling', () => {
+    const message = new CrsDefinitionUnusableError('EPSG:2992', 'alias').message;
+
+    // Decision 6: the extracted code, inside a runnable call — the same
+    // pattern CrsNotRegisteredError's own test pins.
+    expect(message).toContain('registerCrs(2992,');
+    expect(message).toContain('epsg.io/2992');
+  });
+
+  it('falls back to prose for a name with no code to extract', () => {
+    const message = new CrsDefinitionUnusableError('GOOGLE', 'alias').message;
+
+    expect(message).not.toContain('registerCrs(');
+  });
+
+  it('falls back to prose for an EPSG code buried in a longer string', () => {
+    // Not the exact `EPSG:<code>` shape the extraction requires, so there is
+    // no single code to hand back a call for.
+    const message = new CrsDefinitionUnusableError('EPSG:2992 +units=ft', 'alias').message;
+
+    expect(message).not.toContain('registerCrs(');
+  });
+
+  it("gives missing-projection its own reason, not alias's", () => {
+    const error = new CrsDefinitionUnusableError('+lat_0=41.75 +datum=NAD83', 'missing-projection');
+
+    expect(error.reason).toBe('missing-projection');
+  });
+
+  it('tells a missing-projection definition what is actually wrong with it', () => {
+    // Not an alias, and nothing to do with proj4's built-in table or version
+    // drift — the message must say so, not reuse the alias wording.
+    const message = new CrsDefinitionUnusableError(
+      '+lat_0=41.75 +datum=NAD83',
+      'missing-projection',
+    ).message;
+
+    expect(message).toContain('+lat_0=41.75 +datum=NAD83');
+    expect(message).toContain('+proj=');
+    expect(message).not.toContain('proj4.defs');
+    expect(message).not.toContain('alias');
+  });
+});
+
+describe('ZeroPointChunkError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new ZeroPointChunkError();
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('zero-point-chunk');
+    expect(error.name).toBe('ZeroPointChunkError');
+  });
+
+  it('names the Decision 6 defect and both possible sources, without claiming to tell them apart', () => {
+    const message = new ZeroPointChunkError().message;
+
+    expect(message).toContain('zero points');
+    expect(message).toContain('Decision 6');
+    expect(message).toContain('zero-point');
+    // Two possible sources named, and neither one picked over the other —
+    // src/worker/pipeline.ts's own guard cannot tell a lying hierarchy page
+    // apart from this library asking decodeChunk for zero points itself.
+    expect(message).toContain("this library's tileset construction");
+    expect(message).toContain("the file's hierarchy page");
+    expect(message).toContain('nothing at this layer can tell which');
+  });
+});
+
+describe('PositionCountMismatchError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new PositionCountMismatchError(47, 30);
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('position-count-mismatch');
+    expect(error.name).toBe('PositionCountMismatchError');
+  });
+
+  it('names both counts, the expected component count, and how to fix it', () => {
+    const message = new PositionCountMismatchError(47, 30).message;
+
+    expect(message).toContain('47');
+    expect(message).toContain('141'); // 47 * 3
+    expect(message).toContain('30');
+    expect(message).toContain('toRelativePositions(view, transform)');
   });
 });
 

@@ -6,7 +6,11 @@ export {
   UnsupportedHeaderLayoutError,
   WktNotInVlrsError,
 } from './copc.js';
-export { CrsCodeNotFoundError, CrsNotRegisteredError } from './crs.js';
+export {
+  CrsCodeNotFoundError,
+  CrsDefinitionUnusableError,
+  CrsNotRegisteredError,
+} from './crs.js';
 export {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
@@ -16,3 +20,4 @@ export {
   RangeTimeoutError,
   RangeUnsupportedError,
 } from './range.js';
+export { PositionCountMismatchError, ZeroPointChunkError } from './worker.js';

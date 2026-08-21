@@ -51,6 +51,21 @@ const rootPage = await range(pageOffset, pageLength);
 await writeFile(new URL('autzen-root-hierarchy.bin', OUT), rootPage);
 const subtree = Hierarchy.parse(rootPage);
 
+// The file's smallest node (by both point count and byte length), so its
+// decoded numbers can be checked by hand against the compressed bytes.
+// Found from the parsed page rather than hardcoded, so a re-cut against a
+// changed source fails loudly (wrong key below) instead of silently cutting
+// the wrong bytes under the old name.
+const [smallestKey, smallestEntry] = Object.entries(subtree.nodes)
+  .filter(([, node]) => node !== undefined && node.pointCount > 0)
+  .sort(([, a], [, b]) => a.pointDataLength - b.pointDataLength)[0];
+if (smallestKey !== '5-16-3-1') {
+  throw new Error(`expected smallest node 5-16-3-1, got ${smallestKey}`);
+}
+const smallest = { offset: smallestEntry.pointDataOffset, length: smallestEntry.pointDataLength };
+const smallestNode = await range(smallest.offset, smallest.length);
+await writeFile(new URL('autzen-node-5-16-3-1.bin', OUT), smallestNode);
+
 const provenance = {
   source: SOURCE,
   totalBytes: TOTAL,
@@ -73,6 +88,12 @@ const provenance = {
       length: pageLength,
       sha256: sha256(rootPage),
       why: 'the root hierarchy page',
+    },
+    'autzen-node-5-16-3-1.bin': {
+      offset: smallest.offset,
+      length: smallest.length,
+      sha256: sha256(smallestNode),
+      why: "node 5-16-3-1, the file's smallest, for decode fixtures checkable by hand",
     },
   },
   observed: {

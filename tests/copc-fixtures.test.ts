@@ -42,6 +42,12 @@ describe('pinned Autzen fixtures', () => {
       81_114_146,
       'b937e87a8b7b9d7e62bff0e431d349a4d84709fd60c1cfcd3e4dc863253c4d53',
     ],
+    [
+      'autzen-node-5-16-3-1.bin',
+      951,
+      53_565_789,
+      '32bc4c827b9eff0888ceec7f26f17c032def30b823f0afc266d8b423e2b18591',
+    ],
   ])('%s is exactly %i bytes cut from offset %i, byte for byte', (name, length, offset, digest) => {
     const bytes = fixture(name);
     expect(bytes).toHaveLength(length);

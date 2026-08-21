@@ -1,4 +1,5 @@
 import type { Info, Las } from 'copc';
+import { MalformedHierarchyError } from '../errors/index.js';
 import type { RangeReader } from '../range/index.js';
 import { readFileHeader } from './header.js';
 import type { HierarchyPage } from './hierarchy.js';
@@ -35,6 +36,23 @@ export interface CopcFile {
 export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile> {
   const { header, info, totalBytes } = await readFileHeader(reader, signal);
   const wkt = await readWkt(reader, header, signal);
+
+  // The COPC spec requires the hierarchy VLR to exist and to "always consist
+  // of at least ONE hierarchy page" (copc.io, hierarchy VLR section) — an
+  // empty octree already has an encoding, one entry with pointCount 0, so no
+  // conformant file needs a zero-byte root page. Left unchecked, this reaches
+  // readHierarchyPage's own zero-length early return (there for a different
+  // reason: a zero-length ByteRange throws in formatRangeHeader) and opens
+  // successfully with an empty root page instead of naming the file as the
+  // defect's source.
+  if (info.rootHierarchyPage.pageLength === 0) {
+    throw new MalformedHierarchyError(
+      reader.url,
+      'its info VLR declares a root hierarchy page with a byte length of 0, but a ' +
+        'conformant COPC file always has at least one hierarchy page',
+    );
+  }
+
   // The one place `copc.js`'s pageOffset/pageLength spelling is translated into
   // the library's own ByteRange, so nothing downstream has to know about it.
   const root = await readHierarchyPage(

@@ -6,29 +6,6 @@ rediscovered. Delete an entry when the work lands.
 
 ## For the tileset / Worker sub-project
 
-- **Reject `+nadgrids` and `proj4.defs`-alias definitions in
-  `createTransformFromDefinition`, with a typed error.** Both depend on
-  realm-global proj4 state that a definition string only refers to, so proj4
-  2.21 returns `[NaN, NaN]` with nothing but a console line, or throws a value
-  that is not an `Error`. `src/crs/README.md` records the limitation; this is
-  the check that makes it loud.
-
-  The seam is the builder, not the Worker init message: the main thread builds
-  a transform of its own at `fromUrl` time. Measured on this branch, with
-  `+nadgrids=@missing.gsb` appended to the definition the tests register,
-  `regionForKey` on the root key returns
-  `[NaN, NaN, NaN, NaN, 123.79147200000011, 1542.790920000003]` and
-  `measureRootGeometricError` returns `NaN` — the heights survive because they
-  never touch proj4. A whole tileset of half-NaN bounding volumes therefore
-  reaches Cesium without a throw, before the Worker this check was scheduled
-  for exists. `createTransformFromDefinition` is the one chokepoint both
-  consumers pass through, and a typed error thrown there still reaches the
-  caller's `fromUrl` promise.
-- **Call `resolveCrsDefinition` once, on the main thread, at open time**, and
-  put its answer in the Worker's init message. It throws `CrsNotRegisteredError`
-  and `CrsCodeNotFoundError`, which have to surface where `fromUrl` can reject;
-  the same throw inside a Worker becomes an opaque `messageerror`.
-
 - **Check when Cesium fetches an external tileset whose placeholder shares its
   geometric error.** The synthetic tileset gives a page-pointer tile and the
   root of the tileset it expands into the same key, and therefore the same
@@ -50,26 +27,86 @@ rediscovered. Delete an entry when the work lands.
   failure that constraint exists to name. The provider is the only caller, so
   the check belongs there or nowhere.
 
-- **Refuse `pointCount > 0` with `byteSize == 0`, and decide where.** Measured
-  on the shipped code: such an entry is admitted by `checkedLength` (which
-  refuses only a negative length, and must admit zero because a zero-point node
-  legitimately has `offset 0, byteSize 0`), becomes a `points` entry with a byte
-  range nobody can request, and dies one layer down as
-  `InvalidByteRangeError: length 0 at offset 4096` — the wrong-blame failure
-  `checkedLength` exists to prevent, one value over from the one that was fixed.
-  The invariant that actually holds is `pointCount > 0` ⟺ `length > 0`, and
-  neither side of the seam checks it. A milder sibling: a page pointer with
-  `pageLength 0` reaches `readHierarchyPage`'s zero-length early return and
-  expands into an empty external tileset rather than being refused.
-
 - **Read `entry.kind`, not the URI's `n/` vs `h/` prefix.** They are redundant
   encodings of the same fact (`src/tileset/build.ts`), so treat the prefix as
   cosmetic or the two will eventually disagree.
 
-- **When the `+nadgrids` guard lands, move the measurement with it.** The seam
-  is now named in four places, but the numbers behind it live only in this file.
-  Deleting this entry without carrying the measurement into the implementing
-  code loses the evidence for why the check exists.
+- **Enforce the converse of `pointCount > 0 ⟹ length > 0`, and decide where.**
+  `checkedPointCount` (`src/copc/hierarchy.ts`) only checks that direction. The
+  COPC spec's `Entry::byteSize` field is documented as "0 if the pointCount is
+  0" (copc.io, hierarchy VLR section), so `pointCount === 0` with a nonzero
+  length is itself spec-noncompliant. Measured on the shipped code: a node
+  entry `{ pointCount: 0, byteSize: 500 }` is admitted with no error and
+  returned as `{ length: 500, pointCount: 0 }` — the 500 bytes are silently
+  dropped rather than read, since Decision 6 has the tileset omit content for
+  every `pointCount === 0` node regardless of what `length` says.
+
+- **Refuse a point format that carries no colour, at open time.** COPC allows
+  point data record formats 6, 7 and 8; only 7 and 8 carry RGB. Nothing in
+  `src/` validates the format, so a PDRF-6 file reaches `src/worker/pnts.ts`'s
+  `view.getter('Red')` and dies with copc.js's untyped
+  `Error: No extractor for dimension: Red` — no file named, no format named, no
+  guidance, against Decision 6's rule that errors are part of the API. The
+  encoder is the wrong layer to fix it in: the check belongs where the header is
+  first read, so `fromUrl` rejects before a globe loads rather than after the
+  first tile decodes. (Measured during the PNTS sub-project; the untyped throw
+  was reproduced, not inferred.)
+
+- **Measure what `BATCH_LENGTH == POINTS_LENGTH` costs before v1.** Every PNTS
+  tile declares one batch per point, so Cesium builds a per-feature table sized
+  to every point in the tile — for a real 50k-point node, 50k features per tile.
+  Nobody has measured what that costs in memory or in picking-texture terms.
+  `BATCH_ID` is required for picking (Decision 6), so this is a sizing question,
+  not a question of whether to keep it.
+
+- **`pointCount` magnitude is bounded nowhere.** `src/worker/decode.ts`'s doc
+  comment names `src/copc/hierarchy.ts` as the owner, but `checkedPointCount`
+  there (`src/copc/hierarchy.ts`) only enforces `pointCount > 0 ⟹ length > 0`
+  — nothing bounds the magnitude itself. Re-measured on
+  `fixtures/autzen-node-5-16-3-1.bin` (951 bytes, 47 real points):
+  `decodeChunk` asked for 100000 points fabricates them in ~88 ms; asked for
+  1000000, ~513 ms; asked for 2147483647 (`copc.js` reads the field as
+  Int32, so this is the ceiling), it throws `RangeError: Array buffer
+  allocation failed` in ~32 ms — at that size the allocation itself
+  (`pointCount * pointDataRecordLength` bytes) is too large for V8's own
+  typed-array limit to even attempt, not a hang. The range in between (tens
+  of millions of points, gigabytes of fabricated data) was not re-verified
+  here — attempting it risked destabilizing the machine this review ran on
+  — so "hangs and then OOMs" for that range is carried forward as an
+  unconfirmed claim, not a re-measured one. The bound belongs in
+  `readHierarchyPage` beside `checkedLength`, where blame already lands on
+  the file; `DecodeHeader`'s `Pick<>` (`src/worker/decode.ts`) deliberately
+  drops the file's own total `pointCount` (`Las.Header`'s own field,
+  confirmed present in `node_modules/copc/lib/las/header.d.ts`), which is
+  the one cheap upper bound already available. This must close before the
+  pipeline is wired to `fromUrl`.
+
+- **The `>>> 8` colour rule needs an owner.** `src/worker/pnts.ts`'s doc
+  comment is right about what the Autzen measurement settles (every
+  Red/Green/Blue value is an exact multiple of 256 and none a multiple of
+  257 — 8-bit colour left-shifted into a 16-bit field) and right to refuse
+  a per-tile heuristic (neighbouring tiles guessing differently would
+  produce a visible seam between them). But the whole-file or
+  header-driven decision it explicitly defers to has no owner anywhere in
+  `src/` yet. The symptom this leaves open: a writer that stores genuine
+  8-bit colour unscaled in the low byte of these 16-bit fields (rather than
+  left-shifted into the high byte) produces a uniformly black tileset,
+  silently, under the current unconditional `>>> 8` — and it would be
+  reported as "the library is broken," not as a colour-convention
+  mismatch. Belongs at `fromUrl` time (one whole-file inspection), the
+  same layer OVERVIEW already reserves for CRS resolution.
+
+- **Decide `Withheld` before the batch table has users.** LAS 1.4 marks a
+  point the producer deleted with a `Withheld` flag bit, and viewers
+  conventionally hide those points. `node_modules/copc/lib/las/extractor.js`'s
+  `create6` exposes it alongside `Synthetic`, `KeyPoint`, `Overlap` and
+  `ScannerChannel`, but the batch table this branch froze carries none of
+  them — so a caller has no way to write the style that hides withheld
+  points, and they render. The deliberate exclusion discussion in
+  `src/worker/pnts.ts` covers only `PointSourceId`; this one was never
+  considered. Adding it is backward-compatible, so this is a decision to make
+  on purpose rather than a defect — but making it after release means a
+  second contract revision.
 
 ## For the range sub-project
 
@@ -93,11 +130,32 @@ rediscovered. Delete an entry when the work lands.
   one group does" comment near line 618); this entry is the record the design
   doc's own "Prerequisite" section observed did not exist.
 
+## For the publish sub-project
+
+- **`package.json` needs a `files` field before the first publish.**
+  `src/worker/pipeline.ts` cites `docs/superpowers/plans/carried-forward.md`
+  by path in a doc comment, and the file is tracked in the repo so that
+  pointer resolves today. But `package.json` has no `files` field (checked
+  directly), so `npm pack`/`npm publish` falls back to shipping everything
+  not excluded by `.npmignore`/`.gitignore` — which would ship
+  `docs/superpowers/` (this file included) to consumers. OVERVIEW §5's
+  publish smoke test (`npm pack` into an empty project) is the moment this
+  would first be caught if it is not fixed before then.
+
 ## For whichever sub-project first ships a root README
 
 - **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
   no root `README.md` exists yet. `src/crs/ecef.ts` and `src/crs/README.md`
   carry the fact; the user-facing page does not.
+
+- **State that PNTS is 3D Tiles 1.0 legacy, with the adoption rationale, and
+  place the glTF transition after v1.** OVERVIEW §3 Decision 6 requires all
+  three, and none of them is in a user-facing page yet because none exists.
+  The rationale itself: a hand-rolled Worker encoder (header + feature table
+  + binary) is simpler than assembling glTF, and a batch table gives
+  Cesium's style language and picking (`BATCH_ID` per point, required for
+  picking — `src/worker/pnts.ts`'s own doc comment) for free. Decision 6
+  puts the glTF transition explicitly after v1, not as a v1 concern.
 
 ## Unscheduled
 

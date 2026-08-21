@@ -20,6 +20,12 @@
       "length": 8896,
       "sha256": "b937e87a8b7b9d7e62bff0e431d349a4d84709fd60c1cfcd3e4dc863253c4d53",
       "why": "the root hierarchy page"
+    },
+    "autzen-node-5-16-3-1.bin": {
+      "offset": 53565789,
+      "length": 951,
+      "sha256": "32bc4c827b9eff0888ceec7f26f17c032def30b823f0afc266d8b423e2b18591",
+      "why": "node 5-16-3-1, the file's smallest, for decode fixtures checkable by hand"
     }
   },
   "observed": {
