@@ -8,6 +8,19 @@ const WGS84 = '+proj=longlat +datum=WGS84 +no_defs';
 
 export interface CrsTransform {
   /**
+   * File coordinates to WGS84 degrees and metres.
+   *
+   * For finite input the height depends only on `z`: proj4 converts the
+   * horizontal pair and this module scales the height by the definition's
+   * linear unit, so the `x` and `y` passed alongside do not affect it. A
+   * non-finite one is the exception, and no height comes back at all —
+   * measured, proj4 2.21 `forward([NaN, 848882.15])` throws
+   * `TypeError: coordinates must be finite numbers`. The path that can reach
+   * it is not point data but `regionForKey`, which feeds `info.cube`'s
+   * doubles straight from the VLR.
+   */
+  toWgs84(x: number, y: number, z: number): [number, number, number];
+  /**
    * File coordinates to ECEF metres. `z` is taken to be in the same linear unit
    * as `x` and `y`, which is a v1 limitation of its own alongside OVERVIEW §6's
    * ellipsoidal heights: a file measuring height in a unit its horizontal
@@ -45,12 +58,14 @@ function metresPerUnit(definition: string): number {
 }
 
 /**
- * Builds the transform from a file's coordinates to ECEF.
+ * Builds a file's transform: `toWgs84` for degrees and metres, `toEcef` for
+ * ECEF metres, both off the one projection built here.
  *
  * Takes a proj4 definition rather than the file's WKT, which is Decision 6's
  * order split across Decision 3's realm boundary: `resolveCrsDefinition` reads
- * the WKT and consults the registry on the main thread, and only its answer is
- * posted here. Nothing in this file reaches for the registry, and `worker.ts`
+ * the WKT and consults the registry on the main thread, and only its answer
+ * reaches here — handed over directly by a main-thread caller, or posted to a
+ * Worker. Nothing in this file reaches for the registry, and `worker.ts`
  * is the entry point that keeps it that way — a rule about imports would not,
  * so `tests/crs-worker-boundary.test.ts` walks what that entry can reach.
  *
@@ -64,13 +79,22 @@ function metresPerUnit(definition: string): number {
  * scaled into metres and otherwise passes through the projection untouched.
  */
 export function createTransformFromDefinition(definition: string): CrsTransform {
-  const toWgs84 = proj4(definition, WGS84);
+  const toWgs84Projection = proj4(definition, WGS84);
   const metresPerZ = metresPerUnit(definition);
 
+  // Named rather than inlined into both members: the two outputs must come
+  // from one projection, or a caller could place a bounding volume by one
+  // rule and its points by another.
+  const project = (x: number, y: number, z: number): [number, number, number] => {
+    const [longitude, latitude] = toWgs84Projection.forward([x, y]);
+    return [longitude, latitude, z * metresPerZ];
+  };
+
   return {
+    toWgs84: project,
     toEcef(x, y, z) {
-      const [longitude, latitude] = toWgs84.forward([x, y]);
-      return geodeticToEcef(longitude, latitude, z * metresPerZ);
+      const [longitude, latitude, height] = project(x, y, z);
+      return geodeticToEcef(longitude, latitude, height);
     },
   };
 }

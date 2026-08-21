@@ -296,7 +296,7 @@ Expected: PASS, 176 tests.
 Three mutations, each run with `npm test`, each restored afterwards:
 1. `Math.max` → `Math.min` in `measureRootGeometricError`. Expected: the Autzen pin fails (63.74/16 = 3.98, not 88.71).
 2. Drop the third `metresApart` (the z span). Expected: the tall-data test fails.
-3. `2 ** depth` → `2 * depth`. Expected: the depth-5 assertion fails; depth 1 still passes, which is why depth 5 is asserted.
+3. `2 ** depth` → `2 * depth`. Expected: the depth-0 assertion fails first — `2 * 0` is zero, so the division yields `Infinity` — which aborts the `it` before the later expects run. The three depths are still asserted together because they pin the halving rule rather than any one value, but the mutation is caught at depth 0, not at depth 5.
 
 - [ ] **Step 6: Commit**
 
@@ -787,18 +787,20 @@ describe('buildTileTree', () => {
   it('nests entries by octree parentage', async () => {
     const page = await hierarchyPageOf([
       { key: [0, 0, 0, 0], offset: 100, byteSize: 10, pointCount: 5 },
-      { key: [1, 1, 0, 0], offset: 200, byteSize: 20, pointCount: 6 },
-      { key: [2, 3, 0, 0], offset: 300, byteSize: 30, pointCount: 7 },
+      { key: [1, 1, 0, 1], offset: 200, byteSize: 20, pointCount: 6 },
+      { key: [2, 3, 1, 2], offset: 300, byteSize: 30, pointCount: 7 },
     ]);
 
-    // 2-3-0-0's parent is (1, 3>>1, 0, 0) = 1-1-0-0, which is present, so
-    // nothing is synthesised and the chain is three deep.
+    // 2-3-1-2's parent is (1, 3>>1, 1>>1, 2>>1) = 1-1-0-1, which is present, so
+    // nothing is synthesised and the chain is three deep. The three axes carry
+    // different values on purpose: with y and z both zero, a parentOf that
+    // transposed them would pass.
     const tree = buildTileTree(URL, page, ROOT);
 
     expect(tree.synthesizedAncestors).toBe(0);
     expect(keyText(tree.root.key)).toBe('0-0-0-0');
-    expect(tree.root.children.map((child) => keyText(child.key))).toEqual(['1-1-0-0']);
-    expect(tree.root.children[0]?.children.map((child) => keyText(child.key))).toEqual(['2-3-0-0']);
+    expect(tree.root.children.map((child) => keyText(child.key))).toEqual(['1-1-0-1']);
+    expect(tree.root.children[0]?.children.map((child) => keyText(child.key))).toEqual(['2-3-1-2']);
   });
 
   it('gives a zero-point node a tile but no entry', async () => {
@@ -836,10 +838,10 @@ describe('buildTileTree', () => {
   it('synthesises the ancestors a gap skipped, counting tiles', async () => {
     const page = await hierarchyPageOf([
       { key: [0, 0, 0, 0], offset: 100, byteSize: 10, pointCount: 5 },
-      { key: [3, 7, 0, 0], offset: 300, byteSize: 30, pointCount: 7 },
+      { key: [3, 7, 2, 5], offset: 300, byteSize: 30, pointCount: 7 },
     ]);
 
-    // 3-7-0-0's parents are 2-3-0-0 and 1-1-0-0, neither present. One gap,
+    // 3-7-2-5's parents are 2-3-1-2 and 1-1-0-1, neither present. One gap,
     // two levels, so two tiles — which is exactly the ambiguity the count's
     // definition resolves: tiles, not gaps and not files.
     const tree = buildTileTree(URL, page, ROOT);
@@ -847,13 +849,13 @@ describe('buildTileTree', () => {
     expect(tree.synthesizedAncestors).toBe(2);
     const level1 = tree.root.children[0];
     const level2 = level1?.children[0];
-    expect(keyText(level1?.key ?? ROOT)).toBe('1-1-0-0');
+    expect(keyText(level1?.key ?? ROOT)).toBe('1-1-0-1');
     expect(level1?.synthesized).toBe(true);
     // A skeleton: no entry, so no content and no byte range will be emitted.
     expect(level1?.entry).toBeUndefined();
-    expect(keyText(level2?.key ?? ROOT)).toBe('2-3-0-0');
+    expect(keyText(level2?.key ?? ROOT)).toBe('2-3-1-2');
     expect(level2?.synthesized).toBe(true);
-    expect(keyText(level2?.children[0]?.key ?? ROOT)).toBe('3-7-0-0');
+    expect(keyText(level2?.children[0]?.key ?? ROOT)).toBe('3-7-2-5');
     expect(level2?.children[0]?.synthesized).toBe(false);
   });
 
@@ -1093,14 +1095,14 @@ export function buildTileTree(url: string, page: HierarchyPage, rootKey: NodeKey
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `export PATH=/home/kyp/.local/node22/bin:$PATH && npm test && npm run typecheck`
-Expected: PASS, 189 tests.
+Expected: PASS, seven tests more than the previous task left. (Absolute counts in this plan drift: fix rounds add tests, and by Task 5 the suite was at 192 rather than the 189 planned.)
 
 - [ ] **Step 5: Prove the tests bite**
 
 Five mutations, each restored:
 1. Delete the `entries.has(text)` duplicate guard. Expected: the node/page-pointer test fails.
 2. Delete the `isBeneath` guard. Expected: the outside-subtree test fails (with a stack overflow, which is itself the argument for the guard).
-3. Make `ensure` count a named key as synthesised. Expected: the zero-point test fails.
+3. Make `ensure` count a named key as synthesised. Expected: two or three tests fail — the zero-point test, and any other asserting `synthesizedAncestors` is 0. Both readings of the mutation (always increment, or invert the `named` condition) were measured to redden more than the one test this step originally named.
 4. `synthesizedAncestors += 1` → set to 1. Expected: the two-level gap test fails, which is the definition being pinned.
 5. Delete `node.children.sort(byKey)`. Expected: the ordering test fails on the reversed page.
 
@@ -1421,7 +1423,7 @@ export function buildTileset(page: HierarchyPage, context: TilesetContext): Synt
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `export PATH=/home/kyp/.local/node22/bin:$PATH && npm test && npm run typecheck`
-Expected: PASS, 194 tests.
+Expected: PASS, five tests more than the previous task left.
 
 - [ ] **Step 5: Prove the tests bite**
 
@@ -1482,7 +1484,7 @@ OVERVIEW §3, Decisions 1, 2 and 6.
 - [ ] **Step 3: Verify the whole suite and the typecheck**
 
 Run: `export PATH=/home/kyp/.local/node22/bin:$PATH && npm test && npm run typecheck && npx vitest run --no-isolate && npx vitest run --no-isolate --fileParallelism=false`
-Expected: PASS in all three isolation modes, 194 tests, `tsc` exit 0.
+Expected: PASS in all three isolation modes with no new tests, `tsc` exit 0.
 
 - [ ] **Step 4: Commit**
 

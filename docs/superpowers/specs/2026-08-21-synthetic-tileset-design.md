@@ -25,6 +25,8 @@ and does not know what a Blob is.
 
 ```ts
 export interface TilesetContext {
+  /** The file being described. Errors name it, as everywhere else in the library. */
+  readonly url: string;
   /**
    * Absolute URI prefix every tile's content URI is built on.
    *
@@ -60,12 +62,22 @@ export interface SyntheticTileset {
   readonly json: TilesetJson;
   /** Keyed by the full content URI, which is what the interceptor holds. */
   readonly entries: ReadonlyMap<string, TileEntry>;
+  /** How many tiles this call synthesised — see "Synthesis is observable". */
+  readonly synthesizedAncestors: number;
 }
 
 export function buildTileset(page: HierarchyPage, context: TilesetContext): SyntheticTileset;
 
-/** The root geometric error, measured once at open time and reused per page. */
-export function measureRootGeometricError(header: Las.Header, transform: CrsTransform): number;
+/**
+ * The root geometric error, measured once at open time and reused per page.
+ *
+ * Narrowed to the two fields it reads, so a caller need not hold a whole
+ * parsed header to ask, and so the signature says what is measured.
+ */
+export function measureRootGeometricError(
+  header: Pick<Las.Header, 'min' | 'max'>,
+  transform: CrsTransform,
+): number;
 ```
 
 The root page and every sub-page go through the same `buildTileset`. Decision
@@ -263,24 +275,37 @@ updated when it does.
 ## Verification
 
 The failure this module invites is a test that re-derives the builder's own
-arithmetic and therefore agrees with it whatever it does. Three defences:
+arithmetic and therefore agrees with it whatever it does. Two defences, and
+one check that was mistaken for a third:
 
-1. **An independent path to the same place.** The root tile's region must
-   contain the header's corners projected directly — no cube, no stepping, no
-   sampling. The builder starts from `info.cube`; the test starts from the
-   header. They share no intermediate.
-2. **Externally derived constants**, each carried with the derivation that
-   produced it (see 88.710 m above), so the number can be checked by hand
-   against the fixture rather than against the code.
-3. **Invariants over the whole output**, which hold regardless of the values:
+1. **Externally derived constants**, each carried with the derivation that
+   produced it, so the number can be checked by hand against the fixture rather
+   than against the code.
+
+   A weaker check that was originally claimed here as a second defence, and is
+   not one: projecting the header's corners directly and asserting the root
+   region contains them. Measured during Task 4, it is an independent path on
+   **no** side. At depth 0 `Bounds.stepTo` returns its input unchanged, so the
+   stepping never runs; both halves call the same transform instance over the
+   same fixture bytes; and the containment is entailed by the COPC invariant
+   that the cube contains the header bounds, plus the projection's monotonicity
+   along each edge — every lon/lat extremum lands on a corner the region was
+   built from, so the assertion passes by equality whatever the padding. It is
+   kept as a cheap guard against a gross unit or sign error, and it is strictly
+   dominated by the pinned constants above.
+
+2. **Invariants over the whole output**, which hold regardless of the values:
    a child's region inside its parent's, to the parent's own measured padding;
    geometric error halving with depth;
-   no `content` wherever `pointCount` is 0; every content URI absolute; and the
-   registry's key set exactly equal to the set of content URIs in the JSON — if
-   those two drift, a tile is requested that nothing can answer, or a range is
-   held that nothing will ask for. Skeleton tiles appear in neither set, and
-   `synthesizedAncestors` equals the number of tiles that carry no content and
-   had no entry of their own.
+   no `content` wherever `pointCount` is 0; and the registry's key set exactly
+   equal to the set of content URIs in the JSON — if those two drift, a tile is
+   requested that nothing can answer, or a range is held that nothing will ask
+   for. Skeleton tiles appear in neither set, and `synthesizedAncestors` equals
+   the number of tiles that carry no content and had no entry of their own.
+
+   Not listed here: "every content URI absolute". `tokenBase` is an unvalidated
+   input this module concatenates, so the assertion would test the test's own
+   literal rather than the builder.
 
 ### What the fixture can and cannot show
 
@@ -296,10 +321,13 @@ the empty-node branch, the synthesised-ancestor branch, or either refusal,
 because
 the one real page we have contains no instance of any of them.
 
-Those branches are tested against hand-built pages, and each such test says in
-its own comment that it is constructed and why the fixture could not supply it.
-This is stated here so that "tested against the real file" is never claimed for
-a branch no real file in this repo reaches. Cutting a second fixture from a
+Those branches are tested against hand-built pages. Rather than repeat that in
+each test, the reason is given once where the pages are built —
+`tests/hierarchy-page.ts` says the fixture has no sub-pages, no empty nodes and
+no gaps, so a constructed page is the only way to reach those branches, and
+names the test that checks copc.js reads back what it writes. This is recorded
+here so that "tested against the real file" is never claimed for a branch no
+real file in this repo reaches. Cutting a second fixture from a
 multi-page COPC would close the gap; there is no such file available here.
 
 ### What cannot be settled here

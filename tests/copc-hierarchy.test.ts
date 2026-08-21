@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { encodeHierarchyPage as buildPage } from './hierarchy-page.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
 import type { ByteRange, RangeReader } from '../src/range/index.js';
 
@@ -25,36 +26,6 @@ function pageReader(page: Uint8Array, at: number) {
     stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
   };
   return { reader, reads };
-}
-
-/**
- * Builds a page byte-for-byte: 32 bytes per entry, little-endian.
- *
- * `byteSize` keeps the COPC specification's name for the entry's length field,
- * because these are on-disk bytes rather than the descriptors we hand out.
- */
-function buildPage(
-  entries: readonly {
-    key: [number, number, number, number];
-    offset: number;
-    byteSize: number;
-    pointCount: number;
-  }[],
-): Uint8Array {
-  const bytes = new Uint8Array(entries.length * 32);
-  const view = new DataView(bytes.buffer);
-  entries.forEach((entry, index) => {
-    const at = index * 32;
-    const [depth, x, y, z] = entry.key;
-    view.setInt32(at, depth, true);
-    view.setInt32(at + 4, x, true);
-    view.setInt32(at + 8, y, true);
-    view.setInt32(at + 12, z, true);
-    view.setBigInt64(at + 16, BigInt(entry.offset), true);
-    view.setInt32(at + 24, entry.byteSize, true);
-    view.setInt32(at + 28, entry.pointCount, true);
-  });
-  return bytes;
 }
 
 describe('readHierarchyPage against the pinned root page', () => {

@@ -49,9 +49,9 @@ describe('both halves against the real file', () => {
     const stadium = geodeticToEcef(STADIUM.longitude, STADIUM.latitude, 0);
 
     // Measured at 0.22 km, which is right for a cloud covering rather more
-    // than the stadium itself. A kilometre of tolerance still catches every
-    // gross failure — swapped axes, feet read as metres, the wrong definition
-    // — because each of those moves the result much further than that.
+    // than the stadium itself. A kilometre of tolerance still catches a gross
+    // failure of the horizontal pair — swapped axes, the wrong definition —
+    // because each of those moves the result much further than that.
     expect(metresApart(centre, stadium)).toBeLessThan(1000);
   });
 
@@ -91,6 +91,56 @@ describe('both halves against the real file', () => {
     // would make this 1000; over the file's own 406-to-615-foot z range that
     // same mistake lifts its points 282 to 428 metres.
     expect(metresApart(high, low)).toBeCloseTo(1000 * FOOT, 6);
+  });
+
+  it('reports degrees and metres, from the same projection toEcef uses', async () => {
+    registerCrs(2992, OREGON);
+    const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
+
+    const [longitude, latitude, height] = transform.toWgs84(635_577.79, 848_882.15, 406.14);
+
+    // The file's own header minimum. proj4 owns the horizontal pair, so this
+    // is a deliberately coarse pin: six decimals is a 5e-7° budget — 5.6 cm of
+    // latitude, 4.0 cm of longitude here — and proj4 2.21 lands 3.5e-9 and
+    // 1.2e-9 from these literals, under 1% of it either way. They keep proj4's
+    // digits past the sixth deliberately: rounded to what the check reads,
+    // they would sit far closer to the edge of that budget. `proj4` is a
+    // `^2.21.0` range here, and a pin tight enough to read its last digits
+    // would go red on a patch release that moved them with nothing actually
+    // wrong.
+    //
+    // Below this budget nothing here catches a horizontal error: adding
+    // 4.9e-7° to the longitude — a systematic 3.9 cm shift — passes the whole
+    // suite, measured. That is an accepted gap, not coverage living somewhere
+    // else. The test below pins only that the two members agree with each
+    // other, so it stays green on a wrong longitude too. proj4 owns this
+    // number, and 4 cm is invisible at globe scale beside the ellipsoidal
+    // heights OVERVIEW §6 already accepts.
+    expect(longitude).toBeCloseTo(-123.074_986_74, 6);
+    expect(latitude).toBeCloseTo(44.049_718_82, 6);
+    // 406.14 international feet in, metres out — which is the direction the
+    // height must be converted: 406.14 * 0.3048 = 123.791472 m exactly.
+    expect(height).toBeCloseTo(123.791_472, 9);
+  });
+
+  it('agrees with toEcef, which is built on it', async () => {
+    registerCrs(2992, OREGON);
+    const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
+
+    // Not a restatement of the implementation: `toEqual` is exact, so any
+    // divergence between the two members at this one input fails here.
+    // Measured, and each sits under every other test's tolerance: a toWgs84
+    // that rounds its own output, and a 3.9 cm error injected on the toEcef
+    // side alone, which nothing else in the suite catches. What it cannot see
+    // includes whatever moves both sides alike — an error in the step they
+    // share, or a differently built projection, proj4 2.21 returning
+    // bit-identical doubles both for a second build of the same definition and
+    // for a NAD83 two-hop.
+    const [longitude, latitude, height] = transform.toWgs84(637_290.76, 851_209.9, 500);
+
+    expect(transform.toEcef(637_290.76, 851_209.9, 500)).toEqual(
+      geodeticToEcef(longitude, latitude, height),
+    );
   });
 });
 
