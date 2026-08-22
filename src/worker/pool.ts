@@ -1,5 +1,5 @@
 import type { Budget, Lease, RejectionReason } from '../budget/index.js';
-import { fromWire } from '../errors/index.js';
+import { DecodeJobNotAdmittedError, fromWire } from '../errors/index.js';
 import type { DecodeHeader } from './index.js';
 import type { FromWorker, WorkerPort } from './protocol.js';
 
@@ -64,9 +64,41 @@ export interface WorkerPool {
    */
   encode(request: EncodeRequest, signal?: AbortSignal): EncodeVerdict;
   /**
+   * Like `encode`, but waits out a `deferred` verdict instead of returning
+   * it, retrying once a decode-job lease is released, until either admitted
+   * or permanently `rejected`.
+   *
+   * `Budget.acquireRangeRequest`'s `deferred` has somewhere to go:
+   * `ScheduledRangeResource.fetchArrayBuffer` returns `undefined`, and
+   * Cesium's own contract re-asks the tile next frame
+   * (`Cesium3DTile.js:1300-1330`). A decode job's caller,
+   * `Cesium3DTile.makeContent`'s codec branch, has no equivalent channel — it
+   * awaits `codec.createContent(...)` as a `Promise<Cesium3DTileContent>`,
+   * and a rejection there sends the tile straight to
+   * `Cesium3DTileContentState.FAILED`. FAILED is terminal: a tile only ever
+   * re-enters `Cesium3DTilesetCache` (and so only ever becomes eligible for
+   * `unloadTile`, the one path back to UNLOADED) from `process()`, gated on
+   * `this._content.ready` — a FAILED tile has no `_content` and never reaches
+   * that gate. So there is no retry left for a caller to make; this method
+   * is the retry.
+   *
+   * Resubmitting the same `request` on each attempt is sound by
+   * `EncodeRequest.compressed`'s own contract: "a `deferred` verdict never
+   * reaches a port, so the same request is safe to resubmit unchanged."
+   *
+   * `signal`, aborted while still waiting for a lease, rejects immediately
+   * without ever touching the budget — the same "never posted, never even
+   * waiting" treatment `encode` gives an abort that lands before its own
+   * task is queued.
+   */
+  encodeWhenAdmitted(request: EncodeRequest, signal?: AbortSignal): Promise<ArrayBuffer>;
+  /**
    * Fails every outstanding task, releases every lease, terminates every
    * port, and rejects further admission. Each task is settled exactly once
    * regardless of whether `destroy()` or its own reply gets there first.
+   * Also settles every `encodeWhenAdmitted` call still waiting for a lease —
+   * left unsettled, one would outlive the pool and its tile would never
+   * reach `tilesLoaded`.
    */
   destroy(): void;
 }
@@ -115,15 +147,33 @@ interface Slot {
 }
 
 /**
+ * One `encodeWhenAdmitted` call still waiting for a decode-job lease.
+ *
+ * Distinct from `Task`: a `Waiter` has never touched the budget, so there is
+ * no lease to release and no port to occupy — only `request`, and enough to
+ * settle its promise or detach its own abort listener once it either gets a
+ * turn or is cancelled first.
+ */
+interface Waiter {
+  readonly request: EncodeRequest;
+  readonly resolve: (pnts: ArrayBuffer) => void;
+  readonly reject: (error: Error) => void;
+  readonly signal: AbortSignal | undefined;
+  detachAbortListener: (() => void) | undefined;
+}
+
+/**
  * Builds a pool that admits decode work against `options.budget` and posts it
  * to lazily spawned `WorkerPort`s.
  *
  * The budget is the queue: OVERVIEW §3 Decision 5's three-way admission
- * (admitted/deferred/rejected) is this pool's only queueing. This pool holds
- * only the tasks a `Budget.acquireDecodeJob` lease has already been granted
- * for, and holds them only until a port is free — it never queues a
- * `deferred` request, because a `deferred` verdict means the caller's own
- * next call is the retry.
+ * (admitted/deferred/rejected) is this pool's only queueing for `encode`.
+ * `encode` holds only the tasks a `Budget.acquireDecodeJob` lease has already
+ * been granted for, and holds them only until a port is free — it never
+ * queues a `deferred` request, because a `deferred` verdict means the
+ * caller's own next call is the retry. `encodeWhenAdmitted` is the one
+ * caller that makes that next call itself, via its own `deferredWaiters`
+ * queue (see its own doc on `WorkerPool`).
  */
 export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
   const { spawn, definition, budget } = options;
@@ -135,6 +185,12 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
   // forgotten here (see the "defers when the budget defers, posts nothing,
   // and remembers nothing" test).
   const waiting: Task[] = [];
+  // Requests waiting on `encodeWhenAdmitted` for a decode-job lease, in the
+  // order they arrived. Drained one at a time in `finish`, the one place a
+  // lease is released — precisely one unit of capacity just freed, so only
+  // the head is worth retrying; anything behind it is still exactly as
+  // unadmitted as it was.
+  const deferredWaiters: Waiter[] = [];
   let nextId = 0;
   let destroyed = false;
 
@@ -269,7 +325,55 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     task.abandoned = true;
     task.detachAbortListener?.();
     task.lease.release();
+    admitWaiters();
     dispatch();
+  }
+
+  /**
+   * Retries the head of `deferredWaiters` now that a decode-job lease was
+   * just released. Stops the moment a retry itself comes back `deferred` —
+   * exactly one lease was freed by this call, so a second `deferred` means
+   * someone else already took it (or nothing changed), and every waiter
+   * behind the head is untouched either way.
+   *
+   * The head is removed from the queue with `shift()` BEFORE `admitRequest`
+   * runs, not after — `admitRequest` can re-enter this very function
+   * synchronously (`dispatch()` -> `port.post()` throws, or a third-party
+   * port aborts its own task from inside `post()`, either way ->
+   * `abandon` -> `finish` -> `admitWaiters`), and at that point the released
+   * lease is real room this same waiter would otherwise still be sitting at
+   * index 0 to claim a second time — one lease, two admissions, the exact
+   * thing `EncodeRequest.compressed`'s own contract rules out for an already-
+   * admitted request. Doing the removal after `admitRequest` returns is worse
+   * than double-admitting the head: the positional `shift()` then discards
+   * whatever waiter the re-entrant call left at index 0, which is not the one
+   * this call started with — a different, unrelated waiter, evicted from the
+   * queue without ever being settled, invisible even to `destroy()` once it
+   * is off the array. Removing first and only putting it back on the one
+   * outcome that never re-enters (`deferred`) is what keeps each waiter's
+   * removal and its own single settlement paired.
+   */
+  function admitWaiters(): void {
+    while (deferredWaiters.length > 0) {
+      const waiter = deferredWaiters.shift();
+      if (waiter === undefined) return; // unreachable: the loop guard just checked this
+      const verdict = admitRequest(waiter.request, waiter.signal);
+      if (verdict.verdict === 'deferred') {
+        // Still no room. `admitRequest` cannot have re-entered this function
+        // on this branch — it returns before ever touching `dispatch()` or a
+        // port — so putting the same waiter back at the front is exactly
+        // undoing the `shift()` above, not a race with anything else that
+        // may have run meanwhile.
+        deferredWaiters.unshift(waiter);
+        return;
+      }
+      waiter.detachAbortListener?.();
+      if (verdict.verdict === 'admitted') {
+        verdict.pnts.then(waiter.resolve, waiter.reject);
+      } else {
+        waiter.reject(new DecodeJobNotAdmittedError(verdict.reason));
+      }
+    }
   }
 
   /** Fails `task` with `error` and finishes it. Shared by every path that fails a task outright: abort, a port error, a failed `init`, and `destroy()`. */
@@ -368,63 +472,126 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     finish(task);
   }
 
-  return {
-    encode(request, signal) {
-      if (destroyed) {
-        return { verdict: 'rejected', reason: 'destroyed' };
-      }
+  /**
+   * `encode`'s actual body, named so `admitWaiters` can call it again for a
+   * queued request — `WorkerPool.encode`'s own public signature is just this
+   * function assigned below.
+   */
+  function admitRequest(request: EncodeRequest, signal?: AbortSignal): EncodeVerdict {
+    if (destroyed) {
+      return { verdict: 'rejected', reason: 'destroyed' };
+    }
 
-      const admission = budget.acquireDecodeJob();
-      if (admission.verdict !== 'admitted') {
-        return admission;
-      }
+    const admission = budget.acquireDecodeJob();
+    if (admission.verdict !== 'admitted') {
+      return admission;
+    }
 
-      const id = nextId++;
-      // `resolve`/`reject` are only captured here — the executor does no
-      // work of its own. `dispatch()` can spawn a Worker and start a WASM
-      // instance (`spawnSlot`), which is real work with no business running
-      // inside a `new Promise` executor, and Cesium calls `encode()` on the
-      // render path.
-      let settle!: (result: ArrayBuffer) => void;
-      let fail!: (error: Error) => void;
-      const pnts = new Promise<ArrayBuffer>((resolve, reject) => {
-        settle = resolve;
-        fail = reject;
-      });
-      const task: Task = {
-        id,
-        request,
-        lease: admission.lease,
-        settle,
-        fail,
-        abandoned: false,
-        detachAbortListener: undefined,
-      };
+    const id = nextId++;
+    // `resolve`/`reject` are only captured here — the executor does no
+    // work of its own. `dispatch()` can spawn a Worker and start a WASM
+    // instance (`spawnSlot`), which is real work with no business running
+    // inside a `new Promise` executor, and Cesium calls `encode()` on the
+    // render path.
+    let settle!: (result: ArrayBuffer) => void;
+    let fail!: (error: Error) => void;
+    const pnts = new Promise<ArrayBuffer>((resolve, reject) => {
+      settle = resolve;
+      fail = reject;
+    });
+    const task: Task = {
+      id,
+      request,
+      lease: admission.lease,
+      settle,
+      fail,
+      abandoned: false,
+      detachAbortListener: undefined,
+    };
 
-      if (signal?.aborted) {
-        // Aborted before this call ever queued it: never posted, never even
-        // waiting.
-        abandon(task, toError(signal.reason));
-        return { verdict: 'admitted', pnts };
-      }
-      if (signal !== undefined) {
-        const onAbort = (): void => abortTask(task, signal.reason);
-        signal.addEventListener('abort', onAbort, { once: true });
-        task.detachAbortListener = () => signal.removeEventListener('abort', onAbort);
-      }
-
-      waiting.push(task);
-      dispatch();
+    if (signal?.aborted) {
+      // Aborted before this call ever queued it: never posted, never even
+      // waiting.
+      abandon(task, toError(signal.reason));
       return { verdict: 'admitted', pnts };
-    },
+    }
+    if (signal !== undefined) {
+      const onAbort = (): void => abortTask(task, signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+      task.detachAbortListener = () => signal.removeEventListener('abort', onAbort);
+    }
+
+    waiting.push(task);
+    dispatch();
+    return { verdict: 'admitted', pnts };
+  }
+
+  /**
+   * `WorkerPool.encodeWhenAdmitted`'s actual body — see that interface's own
+   * doc for why it waits instead of returning a `deferred` verdict.
+   */
+  function encodeWhenAdmitted(request: EncodeRequest, signal?: AbortSignal): Promise<ArrayBuffer> {
+    const verdict = admitRequest(request, signal);
+    if (verdict.verdict === 'admitted') {
+      return verdict.pnts;
+    }
+    if (verdict.verdict === 'rejected') {
+      return Promise.reject(new DecodeJobNotAdmittedError(verdict.reason));
+    }
+
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      if (signal?.aborted) {
+        // Aborted before this call ever queued it: never touched the budget,
+        // never even waiting — the same treatment `admitRequest` gives this
+        // case for a task that already has a lease.
+        reject(toError(signal.reason));
+        return;
+      }
+
+      const waiter: Waiter = { request, resolve, reject, signal, detachAbortListener: undefined };
+      if (signal !== undefined) {
+        const onAbort = (): void => {
+          const index = deferredWaiters.indexOf(waiter);
+          if (index !== -1) deferredWaiters.splice(index, 1);
+          reject(toError(signal.reason));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        waiter.detachAbortListener = () => signal.removeEventListener('abort', onAbort);
+      }
+      deferredWaiters.push(waiter);
+    });
+  }
+
+  return {
+    encode: admitRequest,
+    encodeWhenAdmitted,
 
     destroy(): void {
-      // Flips the one flag `encode` checks, so no further work is admitted
-      // from here on. `dispatch()` needs no flag of its own: the very next
-      // step below empties `waiting`, and nothing can refill it once
-      // `destroyed` is true, so `dispatch()`'s own loop condition already
-      // stops it from acting on anything post-destroy.
+      // Flips the one flag `admitRequest` checks, so no further work is
+      // admitted from here on. `dispatch()` needs no flag of its own: the
+      // very next step below empties `waiting`, and nothing can refill it
+      // once `destroyed` is true, so `dispatch()`'s own loop condition
+      // already stops it from acting on anything post-destroy.
       destroyed = true;
+
+      // `encodeWhenAdmitted` callers still waiting for a lease never touched
+      // the budget either — settling them is exactly as simple, and just as
+      // necessary: left pending, one would outlive this pool entirely. Drained
+      // BEFORE `waiting` below on purpose: abandoning an admitted task's own
+      // lease calls `finish()`, which calls `admitWaiters()` — if any
+      // `deferredWaiters` were still queued at that point, that cascade would
+      // drain them itself (through `admitRequest`, now returning `destroyed`)
+      // before this loop ever ran, settling them with `DecodeJobNotAdmittedError`
+      // instead of this plain one — correct either way, but which one a given
+      // waiter gets would then depend on how many unrelated tasks happened to
+      // be in `waiting` at the same moment. Draining this queue first removes
+      // that dependency entirely: by the time any cascade could reach
+      // `admitWaiters()`, there is nothing left in it to drain.
+      const stillDeferred = deferredWaiters.splice(0, deferredWaiters.length);
+      for (const waiter of stillDeferred) {
+        waiter.detachAbortListener?.();
+        waiter.reject(new Error('WorkerPool destroyed'));
+      }
 
       // Waiting tasks were never posted, so failing them is the whole story.
       const stillWaiting = waiting.splice(0, waiting.length);

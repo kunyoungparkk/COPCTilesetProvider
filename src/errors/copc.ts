@@ -69,6 +69,34 @@ export class UnsupportedHeaderLayoutError extends CopcTilesetError {
   }
 }
 
+/**
+ * The file's points carry no colour.
+ *
+ * COPC allows point data record formats 6, 7 and 8, and only 7 and 8 have RGB
+ * (`copc.js`'s own extractor for format 6 exposes no `Red`, `Green` or `Blue`).
+ * This library encodes `RGB` into every PNTS tile, so a format-6 file has
+ * nothing to render from — and refusing at open is the difference between one
+ * error naming the file and one untyped throw per tile, inside a Worker,
+ * after the globe has loaded.
+ */
+export class UnsupportedPointFormatError extends CopcTilesetError {
+  readonly code = 'unsupported-point-format';
+  readonly pointDataRecordFormat: number;
+
+  constructor(url: string, pointDataRecordFormat: number) {
+    super(
+      `${url} uses point data record format ${pointDataRecordFormat}, which carries no ` +
+        'colour. This library needs RGB, so only formats 7 and 8 can be rendered. ' +
+        'Nothing can add colour a file does not have — if the source data has it, ' +
+        're-exporting from that source is the fix, and PDAL picks a colour-carrying ' +
+        'format on its own when the points it is given have colour ' +
+        '(`pdal translate coloured-input.las output.copc.laz`). If the source has no ' +
+        'colour either, this library cannot render it.',
+    );
+    this.pointDataRecordFormat = pointDataRecordFormat;
+  }
+}
+
 /** The WKT record is missing from the VLR region, and may be in an EVLR. */
 export class WktNotInVlrsError extends CopcTilesetError {
   readonly code = 'wkt-not-in-vlrs';

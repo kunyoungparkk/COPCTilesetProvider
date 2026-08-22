@@ -143,7 +143,8 @@ function padTrailing(json: string, precedingBytes: number): string {
  * knows which dimensions this point format carries (Autzen's point format 7
  * has `Red`/`Green`/`Blue`; a caller guessing at that split across two
  * modules is how the two would disagree). `placed` supplies the positions
- * Task 5 already transformed and centred; `placed.positions.length` must be
+ * `toRelativePositions` already transformed and centred;
+ * `placed.positions.length` must be
  * `view.pointCount * 3`, matching what `toRelativePositions` always produces
  * for the same view — checked below, unlike `decodeChunk`, which does not
  * re-verify the hierarchy's point count. The two checks are not parallel:

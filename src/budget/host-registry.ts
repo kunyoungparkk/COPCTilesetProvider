@@ -6,7 +6,7 @@ import { Counter } from './counter.js';
  * Module state on purpose. OVERVIEW §7's cap of 6 concurrent requests is the
  * browser's per-host connection ceiling, which two providers reading the same
  * bucket genuinely share — unlike the other three budgets, this one belongs to
- * no single provider (see the design doc's "four things bounded"). A
+ * no single provider. A
  * provider's `destroy` releases only the slots that provider itself holds, by
  * walking its own outstanding leases; it never resets another provider's share
  * of an origin's counter.

@@ -248,7 +248,7 @@ describe('buildTileTree', () => {
     // zero-length page (src/copc/hierarchy.ts): nothing named the root, so
     // it is synthesised even though it has no descendant to bridge a gap
     // to — the one case where `synthesized` is true but the tile carries
-    // nothing at all, named for Task 6.
+    // nothing at all.
     const tree = buildTileTree(URL, page, ROOT);
 
     expect(tree.root.synthesized).toBe(true);

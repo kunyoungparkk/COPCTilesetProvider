@@ -1,12 +1,14 @@
 import { CopcTilesetError } from './base.js';
-import { LeaseAlreadyReleasedError } from './budget.js';
+import { LeaseAlreadyReleasedError, RangeRequestRejectedError } from './budget.js';
 import {
   MalformedHierarchyError,
   NotCopcError,
   UnsupportedHeaderLayoutError,
+  UnsupportedPointFormatError,
   WktNotInVlrsError,
 } from './copc.js';
 import { CrsCodeNotFoundError, CrsDefinitionUnusableError, CrsNotRegisteredError } from './crs.js';
+import { InvalidSourceUrlError, InvalidTokenBaseError } from './provider.js';
 import {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
@@ -15,8 +17,14 @@ import {
   RangeRequestFailedError,
   RangeTimeoutError,
   RangeUnsupportedError,
+  UnknownTileRequestError,
 } from './range.js';
-import { PositionCountMismatchError, WorkerTaskFailedError, ZeroPointChunkError } from './worker.js';
+import {
+  DecodeJobNotAdmittedError,
+  PositionCountMismatchError,
+  WorkerTaskFailedError,
+  ZeroPointChunkError,
+} from './worker.js';
 
 /**
  * A thrown value flattened into something `postMessage` can carry.
@@ -44,16 +52,22 @@ const BY_CODE: ReadonlyMap<string, { readonly prototype: CopcTilesetError }> = n
   ['crs-code-not-found', CrsCodeNotFoundError],
   ['crs-definition-unusable', CrsDefinitionUnusableError],
   ['crs-not-registered', CrsNotRegisteredError],
+  ['decode-job-not-admitted', DecodeJobNotAdmittedError],
   ['invalid-byte-range', InvalidByteRangeError],
+  ['invalid-source-url', InvalidSourceUrlError],
+  ['invalid-token-base', InvalidTokenBaseError],
   ['lease-already-released', LeaseAlreadyReleasedError],
   ['malformed-hierarchy', MalformedHierarchyError],
   ['not-copc', NotCopcError],
   ['position-count-mismatch', PositionCountMismatchError],
   ['range-network', RangeNetworkError],
   ['range-request-failed', RangeRequestFailedError],
+  ['range-request-rejected', RangeRequestRejectedError],
   ['range-timeout', RangeTimeoutError],
   ['range-unsupported', RangeUnsupportedError],
+  ['unknown-tile-request', UnknownTileRequestError],
   ['unsupported-header-layout', UnsupportedHeaderLayoutError],
+  ['unsupported-point-format', UnsupportedPointFormatError],
   ['wkt-not-in-vlrs', WktNotInVlrsError],
   ['worker-task-failed', WorkerTaskFailedError],
   ['zero-point-chunk', ZeroPointChunkError],

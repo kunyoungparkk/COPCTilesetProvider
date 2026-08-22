@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   ContentRangeMismatchError,
+  DecodeJobNotAdmittedError,
   ContentRangeUnreadableError,
   CopcTilesetError,
   CrsDefinitionUnusableError,
   InvalidByteRangeError,
+  LeaseAlreadyReleasedError,
   MalformedHierarchyError,
   NotCopcError,
   PositionCountMismatchError,
   RangeNetworkError,
   RangeRequestFailedError,
+  RangeRequestRejectedError,
   RangeTimeoutError,
   RangeUnsupportedError,
+  UnknownTileRequestError,
   UnsupportedHeaderLayoutError,
+  UnsupportedPointFormatError,
   WktNotInVlrsError,
   WorkerTaskFailedError,
   ZeroPointChunkError,
@@ -179,6 +184,27 @@ describe('UnsupportedHeaderLayoutError', () => {
   });
 });
 
+describe('UnsupportedPointFormatError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new UnsupportedPointFormatError('https://host/a.copc.laz', 6);
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('unsupported-point-format');
+    expect(error.name).toBe('UnsupportedPointFormatError');
+    expect(error.pointDataRecordFormat).toBe(6);
+  });
+
+  it('names the file, the format, and the fix', () => {
+    const message = new UnsupportedPointFormatError('https://host/a.copc.laz', 6).message;
+
+    expect(message).toContain('https://host/a.copc.laz');
+    expect(message).toContain('format 6');
+    expect(message).toContain('colour');
+    // The one action that turns this file into one we can read.
+    expect(message).toContain('pdal translate');
+  });
+});
+
 describe('CrsDefinitionUnusableError', () => {
   it('gives every error a stable code and the base type', () => {
     const error = new CrsDefinitionUnusableError('+proj=lcc +nadgrids=@missing.gsb', 'grid-shift');
@@ -313,6 +339,51 @@ describe('WorkerTaskFailedError', () => {
   });
 });
 
+describe('RangeRequestRejectedError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new RangeRequestRejectedError('copc://a1b2c3/n/0-0-0-0', 'over-capacity');
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('range-request-rejected');
+    expect(error.name).toBe('RangeRequestRejectedError');
+    expect(error.url).toBe('copc://a1b2c3/n/0-0-0-0');
+    expect(error.reason).toBe('over-capacity');
+  });
+
+  it('tells over-capacity apart from destroyed', () => {
+    const overCapacity = new RangeRequestRejectedError('copc://a/n/0-0-0-0', 'over-capacity').message;
+    const destroyed = new RangeRequestRejectedError('copc://a/n/0-0-0-0', 'destroyed').message;
+
+    expect(overCapacity).toContain('larger than');
+    // `createBudget` is not exported and `COPCTilesetProviderOptions` exposes
+    // no budget limit, so advice naming either is advice the caller who reads
+    // this message has no way to act on.
+    expect(overCapacity).not.toContain('createBudget');
+    expect(overCapacity).toContain('Rewrite it with fewer points per node');
+    expect(overCapacity).not.toContain('destroyed');
+    expect(destroyed).toContain('destroyed');
+    expect(destroyed).not.toContain('larger than');
+  });
+});
+
+describe('UnknownTileRequestError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new UnknownTileRequestError('copc://a1b2c3/n/9-9-9-9');
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('unknown-tile-request');
+    expect(error.name).toBe('UnknownTileRequestError');
+    expect(error.url).toBe('copc://a1b2c3/n/9-9-9-9');
+  });
+
+  it('blames this library rather than the caller or the file', () => {
+    const message = new UnknownTileRequestError('copc://a1b2c3/n/9-9-9-9').message;
+
+    expect(message).toContain('copc://a1b2c3/n/9-9-9-9');
+    expect(message).toContain('defect in this library');
+  });
+});
+
 describe('WktNotInVlrsError', () => {
   it('says where the WKT probably is and how to move it', () => {
     const error = new WktNotInVlrsError('https://host/evlr.copc.laz');
@@ -325,5 +396,51 @@ describe('WktNotInVlrsError', () => {
     // Two ways forward, and the message has to offer both.
     expect(error.message).toContain('pdal translate');
     expect(error.message).toContain('open an issue');
+  });
+});
+
+// Both of these had a stable `code` and no message assertion anywhere. The
+// wire map's source scan proves a code exists and is mapped to its own class;
+// it says nothing about what the message says, and Decision 6 makes messages
+// part of the API too.
+describe('LeaseAlreadyReleasedError', () => {
+  it('names the three acquire calls and blames the caller, not the budget', () => {
+    const error = new LeaseAlreadyReleasedError();
+
+    expect(error.code).toBe('lease-already-released');
+    expect(error.name).toBe('LeaseAlreadyReleasedError');
+    // A double release is unrecoverable by design, so the message has to say
+    // whose bug it is rather than suggest a retry.
+    expect(error.message).toContain('acquireRangeRequest');
+    expect(error.message).toContain('acquireDecodeJob');
+    expect(error.message).toContain('acquireHierarchyPage');
+    expect(error.message).toContain('exactly once');
+    expect(error.message).toContain('bug in the caller');
+  });
+});
+
+describe('DecodeJobNotAdmittedError', () => {
+  it('tells a destroyed pool apart from one whose budget is too small to ever fit', () => {
+    const destroyed = new DecodeJobNotAdmittedError('destroyed');
+    const overCapacity = new DecodeJobNotAdmittedError('over-capacity');
+
+    expect(destroyed.code).toBe('decode-job-not-admitted');
+    expect(destroyed.name).toBe('DecodeJobNotAdmittedError');
+    expect(destroyed.reason).toBe('destroyed');
+    expect(overCapacity.reason).toBe('over-capacity');
+
+    // The two reasons need different messages because they need different
+    // reactions: nothing brings a destroyed provider back, while an
+    // over-capacity budget names the two knobs that fix it.
+    expect(destroyed.message).toContain('destroyed');
+    expect(destroyed.message).toContain('will not');
+    // Names the knob a caller actually holds — `createBudget` and
+    // `createWorkerPool` are internal — and says plainly that the state is
+    // unreachable for any real pool size, so a reader who hits it looks for a
+    // zero capacity rather than for a number to raise.
+    expect(overCapacity.message).toContain('workerPoolSize');
+    expect(overCapacity.message).toContain('zero');
+    expect(overCapacity.message).not.toContain('createBudget');
+    expect(overCapacity.message).not.toContain('createWorkerPool');
   });
 });

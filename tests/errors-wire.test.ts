@@ -97,18 +97,32 @@ describe('toWire / fromWire', () => {
     // Recursive: `src/errors/` is flat today, and a class added one directory
     // down would otherwise be invisible to the guard that exists to make
     // forgetting impossible.
+    // The class name as well as the code, because presence is not the property
+    // that matters: `fromWire` assigns `code` from the wire after choosing a
+    // class, so a code mapped to the WRONG class rebuilds with the right code
+    // and the wrong prototype — and a caller's `instanceof` silently stops
+    // matching. Capturing both halves of each declaration is what lets this
+    // check the association rather than the key set.
     const declared = readdirSync(directory, { recursive: true, encoding: 'utf8' })
       .filter((name) => name.endsWith('.ts'))
-      .flatMap((name) => [...readFileSync(`${directory}${name}`, 'utf8').matchAll(/readonly code = '([^']+)'/g)])
-      .map((match) => match[1]);
+      .flatMap((name) => [
+        ...readFileSync(`${directory}${name}`, 'utf8').matchAll(
+          /export class (\w+) extends CopcTilesetError \{\s*readonly code = '([^']+)'/g,
+        ),
+      ])
+      .map((match) => ({ className: match[1], code: match[2] }));
 
     // Guards the guard: a regex that stops matching would make this pass on
     // an empty set.
     expect(declared.length).toBeGreaterThan(15);
 
-    for (const code of declared) {
+    for (const { className, code } of declared) {
       const rebuilt = fromWire({ code: code ?? '', name: 'X', message: 'm', stack: undefined });
       expect(rebuilt.code, `code ${code} is missing from the wire map`).toBe(code);
+      expect(
+        rebuilt.constructor.name,
+        `code ${code} is mapped to the wrong class in the wire map`,
+      ).toBe(className);
     }
   });
 });

@@ -150,3 +150,30 @@ export class InvalidByteRangeError extends CopcTilesetError {
     this.detail = detail;
   }
 }
+
+/**
+ * A virtual tile URI carries this provider's own token prefix, but no
+ * descriptor was ever registered for it.
+ *
+ * Decision 4: every Range request is built from an offset and size a previous
+ * response reported, never from a guess. A URI under `tokenBase` is one this
+ * provider itself minted — into the synthetic tileset JSON or a hierarchy
+ * page's own children — so a miss here is not something a caller or a server
+ * did; it is a bug in this library's own bookkeeping (the registry entry was
+ * never added, or was removed while a tile referencing it was still live).
+ */
+export class UnknownTileRequestError extends CopcTilesetError {
+  readonly code = 'unknown-tile-request';
+  readonly url: string;
+
+  constructor(url: string) {
+    super(
+      `${url} names a tile this library has no descriptor for, though it carries this ` +
+        "provider's own token prefix. Every such URI is minted by this library's own " +
+        'tileset construction, so one with no matching registry entry is a defect in ' +
+        'this library rather than anything the requested file or a caller did. Please ' +
+        'open an issue with the COPC file that produced it.',
+    );
+    this.url = url;
+  }
+}

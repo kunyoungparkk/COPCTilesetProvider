@@ -1,10 +1,17 @@
 import type { Info, Las } from 'copc';
-import { MalformedHierarchyError } from '../errors/index.js';
+import { MalformedHierarchyError, UnsupportedPointFormatError } from '../errors/index.js';
 import type { RangeReader } from '../range/index.js';
 import { readFileHeader } from './header.js';
 import type { HierarchyPage } from './hierarchy.js';
 import { readHierarchyPage } from './hierarchy.js';
 import { readWkt } from './wkt.js';
+
+// Only formats 7 and 8 carry the RGB every PNTS tile needs (src/worker/pnts.ts
+// writes it unconditionally). Checked here, right after the header is parsed
+// and before anything reads on, so a format-6 file is refused once at open
+// with the file named — not once per tile, inside a Worker, after the globe
+// has already loaded.
+const FORMATS_WITH_COLOUR = new Set([7, 8]);
 
 export interface CopcFile {
   readonly header: Las.Header;
@@ -35,6 +42,11 @@ export interface CopcFile {
  */
 export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile> {
   const { header, info, totalBytes } = await readFileHeader(reader, signal);
+
+  if (!FORMATS_WITH_COLOUR.has(header.pointDataRecordFormat)) {
+    throw new UnsupportedPointFormatError(reader.url, header.pointDataRecordFormat);
+  }
+
   const wkt = await readWkt(reader, header, signal);
 
   // The COPC spec requires the hierarchy VLR to exist and to "always consist

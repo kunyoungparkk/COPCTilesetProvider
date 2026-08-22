@@ -162,6 +162,81 @@ describe('openCopc', () => {
     await expect(failure).rejects.toThrow('10653336');
   });
 
+  // COPC allows point data record formats 6, 7 and 8, and only 7 and 8 carry
+  // RGB (copc.js's own extractor for format 6 defines no Red/Green/Blue).
+  // This library encodes RGB into every PNTS tile, so a format-6 file has
+  // nothing to render from — refusing at open names the file once, instead
+  // of an untyped throw per tile inside a Worker after the globe has loaded.
+  describe('point data record format', () => {
+    // Byte 104 packs the format in its low nibble and LAZ's compression flag
+    // in the high bit (`node_modules/copc/lib/las/header.js`: `dv.getUint8(104)
+    // & 0b1111`). Autzen's raw byte is 135 (0b10000111): masking in a new
+    // format without preserving the high bits would also clear the
+    // compression flag, failing the file for an unrelated reason.
+    const patchPointFormat = (format: number): Uint8Array => {
+      const bytes = new Uint8Array(load('autzen-head.bin'));
+      bytes[104] = (bytes[104]! & 0b1111_0000) | format;
+      return bytes;
+    };
+
+    const withPatchedHead = (
+      reader: RangeReader,
+      reads: ByteRange[],
+      patched: Uint8Array,
+    ): RangeReader => ({
+      ...reader,
+      read: (range, signal) => {
+        if (range.offset === 0) {
+          reads.push(range);
+          return Promise.resolve({ bytes: patched.buffer as ArrayBuffer, totalBytes: 81_123_042 });
+        }
+        return reader.read(range, signal);
+      },
+    });
+
+    it('refuses a format that carries no colour', async () => {
+      const { reader, reads } = autzenReader();
+      const withFormat6 = withPatchedHead(reader, reads, patchPointFormat(6));
+
+      const failure = openCopc(withFormat6);
+
+      await expect(failure).rejects.toMatchObject({
+        code: 'unsupported-point-format',
+        pointDataRecordFormat: 6,
+      });
+      await expect(failure).rejects.toThrow('https://host/autzen.copc.laz');
+      await expect(failure).rejects.toThrow('6');
+    });
+
+    it('opens formats 7 and 8, which carry RGB', async () => {
+      const { reader, reads } = autzenReader();
+      // Autzen is already format 7; format 8 is the one that needs constructing.
+      // Only the format byte is patched, so this file is not a real format-8
+      // record — a genuine one is 38 bytes per point rather than the 36 the
+      // header still declares. `openCopc` never reads a point body, so the
+      // inconsistency is invisible to what is under test, and what this pins
+      // is exactly one thing: 8 is on the accepted side of the check.
+      const withFormat8 = withPatchedHead(reader, reads, patchPointFormat(8));
+
+      const file = await openCopc(withFormat8);
+
+      expect(file.header.pointDataRecordFormat).toBe(8);
+    });
+
+    it('refuses before the hierarchy page is read', async () => {
+      const { reader, reads } = autzenReader();
+      const withFormat6 = withPatchedHead(reader, reads, patchPointFormat(6));
+
+      await expect(openCopc(withFormat6)).rejects.toMatchObject({
+        code: 'unsupported-point-format',
+      });
+      // Only the header/info read happened — no read for the WKT VLR region
+      // or the root hierarchy page, because the refusal is at open, not at
+      // the first tile a Worker would later fail to decode.
+      expect(reads).toEqual([{ offset: 0, length: 589 }]);
+    });
+  });
+
   // Each of the three readers has this test for its own single read. The
   // signal has to survive every hop, and only a reader that sees all three
   // reads can say so.

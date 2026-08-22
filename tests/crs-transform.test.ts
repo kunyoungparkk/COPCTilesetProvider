@@ -64,8 +64,9 @@ describe('both halves against the real file', () => {
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     const corner = transform.toEcef(635_577.79, 848_882.15, 406.14);
-    // The pinned measurement, converted through the ECEF step Task 3 verified
-    // against closed-form values. This is a regression pin, not an accuracy
+    // The pinned measurement, converted through the ECEF step
+    // tests/crs-ecef.test.ts verifies against closed-form values. This is a
+    // regression pin, not an accuracy
     // check: it holds the wiring still, and says nothing proj4 does not. The
     // height is written in metres because that is what toEcef returns; the
     // 406.14 above is the file's own number, which is feet.

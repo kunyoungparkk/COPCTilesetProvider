@@ -20,3 +20,38 @@ export class LeaseAlreadyReleasedError extends CopcTilesetError {
     );
   }
 }
+
+/**
+ * `Budget.acquireRangeRequest` returned `'rejected'` for a tile's content
+ * request.
+ *
+ * Unlike `'deferred'` — which Cesium re-asks next frame (`ScheduledRangeResource`
+ * returns `undefined` for it, matching `Cesium3DTile.js`'s own contract) —
+ * `'rejected'` is permanent, so Cesium has to see a failed tile rather than one
+ * that stays pending forever. `'over-capacity'` means this request could never
+ * fit even with nothing else outstanding — the byte budget or the host's
+ * concurrent-request cap is smaller than this one request; `'destroyed'` means
+ * the provider that owns this budget has already been torn down.
+ */
+export class RangeRequestRejectedError extends CopcTilesetError {
+  readonly code = 'range-request-rejected';
+  readonly url: string;
+  readonly reason: 'over-capacity' | 'destroyed';
+
+  constructor(url: string, reason: 'over-capacity' | 'destroyed') {
+    super(
+      reason === 'destroyed'
+        ? `${url} could not be requested: this provider has been destroyed, and its ` +
+          'budget rejects every acquisition from that point on. This tile will not be ' +
+          'retried — the provider itself is gone.'
+        : `${url} could not be requested: this one request is larger than ` +
+          'the whole Range-response budget this provider will ever hold at once, so no ' +
+          'amount of waiting would free enough room for it. That budget is not ' +
+          'adjustable through this library — the file is what has to change. Rewrite ' +
+          'it with fewer points per node, so that no single node\'s compressed chunk is ' +
+          'that large.',
+    );
+    this.url = url;
+    this.reason = reason;
+  }
+}

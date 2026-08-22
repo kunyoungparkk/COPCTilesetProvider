@@ -293,9 +293,10 @@ describe('buildTileset', () => {
     expect(check(json.root, tree.root)).toBe(278);
 
     // The min-corner and sibling-collapse mutations above are still relative
-    // to some other tile in the tree. A key transposed on x/y (Task 5's own
-    // trap: swapping axes keeps a cube that nests and keeps it distinct from
-    // its neighbours, just in the wrong place) needs one tile's region pinned
+    // to some other tile in the tree. A key transposed on x/y is the trap
+    // those two cannot see: swapping axes keeps a cube that nests and keeps
+    // it distinct from its neighbours, just in the wrong place. It needs one
+    // tile's region pinned
     // to a value computed outside this walk. Node 4-2-1-0 is on the pinned
     // page (measured: present in `page.nodes`) with x != y, so a swap changes
     // the answer rather than coincidentally reproducing it.

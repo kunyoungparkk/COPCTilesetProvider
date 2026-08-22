@@ -67,6 +67,41 @@ export class PositionCountMismatchError extends CopcTilesetError {
 }
 
 /**
+ * The Worker pool's decode-job budget rejected a point tile's chunk outright
+ * — permanently, not "not yet".
+ *
+ * `Cesium3DTile.js`'s codec branch (OVERVIEW §3, Decision 2) awaits
+ * `codec.createContent(...)` as a `Promise<Cesium3DTileContent>`, with no
+ * "ask again next frame" outcome the way `ScheduledRangeResource`'s
+ * `fetchArrayBuffer` has for a Range request's `deferred` verdict — a content
+ * promise that never settles would just hang the tile forever rather than
+ * retry it. `WorkerPool.encodeWhenAdmitted` already waits out a transient
+ * `deferred` verdict by resubmitting once a lease frees up (its own doc
+ * explains why that is sound), so only `rejected` — `over-capacity` or
+ * `destroyed`, never recoverable by waiting — ever reaches this error,
+ * the same way Decision 5 already treats a permanent Range rejection.
+ */
+export class DecodeJobNotAdmittedError extends CopcTilesetError {
+  readonly code = 'decode-job-not-admitted';
+  readonly reason: 'over-capacity' | 'destroyed';
+
+  constructor(reason: 'over-capacity' | 'destroyed') {
+    super(
+      reason === 'destroyed'
+        ? "A point tile could not be decoded: this provider's Worker pool has been " +
+          'destroyed, and it rejects every request from that point on. This tile will not ' +
+          'be retried — the provider itself is gone.'
+        : "A point tile could not be decoded: the Worker pool's decode-job budget is " +
+          'smaller than one job can ever fit, even with nothing else outstanding, so no ' +
+          'amount of waiting would let it through. A provider sets that budget to twice ' +
+          'its `workerPoolSize`, so this cannot happen for any pool size of 1 or more — ' +
+          'reaching it means the budget was built with a decode capacity of zero.',
+    );
+    this.reason = reason;
+  }
+}
+
+/**
  * Something failed inside a Worker that this library did not throw — laz-perf
  * rejecting a chunk, V8 refusing an allocation, a bug.
  *

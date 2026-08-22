@@ -1,9 +1,10 @@
 export { CopcTilesetError } from './base.js';
-export { LeaseAlreadyReleasedError } from './budget.js';
+export { LeaseAlreadyReleasedError, RangeRequestRejectedError } from './budget.js';
 export {
   MalformedHierarchyError,
   NotCopcError,
   UnsupportedHeaderLayoutError,
+  UnsupportedPointFormatError,
   WktNotInVlrsError,
 } from './copc.js';
 export {
@@ -11,6 +12,7 @@ export {
   CrsDefinitionUnusableError,
   CrsNotRegisteredError,
 } from './crs.js';
+export { InvalidSourceUrlError, InvalidTokenBaseError } from './provider.js';
 export {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
@@ -19,8 +21,10 @@ export {
   RangeRequestFailedError,
   RangeTimeoutError,
   RangeUnsupportedError,
+  UnknownTileRequestError,
 } from './range.js';
 export {
+  DecodeJobNotAdmittedError,
   PositionCountMismatchError,
   WorkerTaskFailedError,
   ZeroPointChunkError,

@@ -5,6 +5,8 @@
   "license": "MIT",
   "author": "Kunyoung Park",
   "type": "module",
+  "exports": "./src/index.ts",
+  "types": "./src/index.ts",
   "engines": {
     "node": ">=22"
   },

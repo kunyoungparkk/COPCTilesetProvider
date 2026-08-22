@@ -40,6 +40,7 @@ function engineSource(path: string): string {
 
 const tile = engineSource('Scene/Cesium3DTile.js');
 const tileset = engineSource('Scene/Cesium3DTileset.js');
+const resource = engineSource('Core/Resource.js');
 
 // Everything here was read off this version. Pinning it means a failure tells
 // you which of the two happened: Cesium moved, or the pin did.
@@ -89,6 +90,39 @@ describe('Cesium runtime content codec contract', () => {
     // Only ever set on the path we skip, so a hierarchy page expanded into an
     // external tileset has to set it itself or Cesium treats it as renderable.
     expect(tile.indexOf('tile.hasTilesetContent = true')).toBeGreaterThan(classify);
+  });
+
+  // ScheduledRangeResource (src/cesium-runtime/resource.ts) overrides clone()
+  // specifically to survive this branch. Without the override, every derived
+  // tile resource downgrades to a plain Resource and copc:// tokens reach the
+  // network.
+  it('builds a plain Resource on clone() when handed no result, forcing the override', () => {
+    expectSnippet(resource, 'Resource.prototype.clone = function (result) { if (!defined(result)) { return new Resource');
+  });
+
+  // ScheduledRangeResource's fetchArrayBuffer maps the budget's `deferred`
+  // verdict onto exactly this branch by returning undefined: a tile whose
+  // fetch returns undefined is not failed, only re-asked next frame.
+  it('treats an undefined fetchArrayBuffer result as "ask again next frame", not "failed"', () => {
+    expectSnippet(
+      tile,
+      'const promise = resource.fetchArrayBuffer(); if (!defined(promise)) { ++tileset.statistics.numberOfAttemptedRequests; return; }',
+    );
+  });
+
+  // ScheduledRangeResource's own doc comment (`src/cesium-runtime/resource.ts`)
+  // claims a tile's content resource is always this class because
+  // `Cesium3DTileset.fromUrl` routes the base resource it is handed through
+  // `Resource.createIfNeeded`, which — for an argument that is already a
+  // `Resource` — calls `getDerivedResource` rather than building a plain
+  // `Resource` from scratch. That is what lets `clone()`'s override (pinned
+  // above) carry the subclass forward from the very first call, not only on
+  // tiles derived later. Two snippets, not one spanning both: Cesium's own
+  // explanatory comment sits between the `if` and the `return`, and this
+  // guard does not depend on that comment's wording.
+  it("routes fromUrl's own resource through getDerivedResource, preserving its subclass", () => {
+    expectSnippet(resource, 'Resource.createIfNeeded = function (resource) { if (resource instanceof Resource) {');
+    expectSnippet(resource, 'return resource.getDerivedResource({ request: resource.request, });');
   });
 
   it('exposes the content constructors a codec has to return', async () => {

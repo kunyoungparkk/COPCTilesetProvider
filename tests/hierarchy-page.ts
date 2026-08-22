@@ -25,8 +25,8 @@ const CONSTRUCTED_FILE_POINTS = 1_000_000;
  * The layout is the specification's: `VoxelKey` as four little-endian int32,
  * then a uint64 offset, an int32 byteSize, and an int32 pointCount. Written by
  * hand because the pinned fixture has no sub-pages, no empty nodes and no
- * gaps, so the tile-tree builder Task 5 adds has no real page to exercise
- * those branches against. `tests/hierarchy-page.test.ts` checks copc.js reads
+ * gaps, so `src/tileset/tree.ts`'s tile-tree builder has no real page to
+ * exercise those branches against. `tests/hierarchy-page.test.ts` checks copc.js reads
  * back what this writes, so a constructed page is evidence rather than a
  * private convention.
  */

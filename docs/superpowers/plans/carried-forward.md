@@ -13,35 +13,6 @@ rediscovered. Delete an entry when the work lands.
   moment is a browser question; the hard gate proved the expansion path works,
   not its timing.
 
-- **Check that a `deferred` admission actually gets re-asked.** The budget
-  answers synchronously and holds nothing, on the reading that Cesium's
-  traversal re-requests the tile next frame (§4). If an intercepted `Resource`
-  that declines instead marks the tile failed, the tile never returns, and the
-  budget cannot tell — it has already forgotten the request by design.
-
-- **Decide who validates `TilesetContext.tokenBase`.** Its contract — absolute
-  with a scheme (Decision 2's first constraint), trailing `/`, characters that
-  survive URI normalisation, stable and unique per provider — is documented on
-  the type and enforced by nothing. Every test passes `copc://a1b2c3/`. A
-  relative prefix would silently produce relative content URIs, which is the
-  failure that constraint exists to name. The provider is the only caller, so
-  the check belongs there or nowhere.
-
-- **Read `entry.kind`, not the URI's `n/` vs `h/` prefix.** They are redundant
-  encodings of the same fact (`src/tileset/build.ts`), so treat the prefix as
-  cosmetic or the two will eventually disagree.
-
-- **Refuse a point format that carries no colour, at open time.** COPC allows
-  point data record formats 6, 7 and 8; only 7 and 8 carry RGB. Nothing in
-  `src/` validates the format, so a PDRF-6 file reaches `src/worker/pnts.ts`'s
-  `view.getter('Red')` and dies with copc.js's untyped
-  `Error: No extractor for dimension: Red` — no file named, no format named, no
-  guidance, against Decision 6's rule that errors are part of the API. The
-  encoder is the wrong layer to fix it in: the check belongs where the header is
-  first read, so `fromUrl` rejects before a globe loads rather than after the
-  first tile decodes. (Measured during the PNTS sub-project; the untyped throw
-  was reproduced, not inferred.)
-
 - **Measure what `BATCH_LENGTH == POINTS_LENGTH` costs before v1.** Every PNTS
   tile declares one batch per point, so Cesium builds a per-feature table sized
   to every point in the tile — for a real 50k-point node, 50k features per tile.
@@ -75,18 +46,6 @@ rediscovered. Delete an entry when the work lands.
   considered. Adding it is backward-compatible, so this is a decision to make
   on purpose rather than a defect — but making it after release means a
   second contract revision.
-
-- **Decide what a caller does with a `deferred` it can never satisfy.**
-  `WorkerPool.encode` returns the budget's own three-way verdict, and
-  `deferred` means "ask again next frame" — which is right when the budget is
-  merely full. It carries nothing that distinguishes that from a `spawn`
-  factory that is permanently broken (a CSP `worker-src` denial, a bundle that
-  will not load). The pool now fails the waiting tasks in that case rather than
-  stalling, so nothing hangs, but a codec reading `verdict === 'deferred'` has
-  no signal to stop retrying. Adding a third `RejectionReason` was considered
-  and rejected here: there is no caller yet to design against, and the type
-  would ripple through code nobody has written. Decide it when
-  `src/cesium-runtime/` exists and its retry loop is real.
 
 - **`EncodeVerdict`'s `admitted` no longer means "this will be attempted".**
   On the `spawn`/`post` failure paths a caller gets `{ verdict: 'admitted' }`
@@ -122,7 +81,38 @@ rediscovered. Delete an entry when the work lands.
   one group does" comment near line 618); this entry is the record the design
   doc's own "Prerequisite" section observed did not exist.
 
+- **Coalescing has no production caller, so §7's two Range knobs cannot be
+  measured.** The whole merge implementation — gap threshold, waste ratio,
+  buffer splitting — lives behind `readMany`, and `readMany` is called only
+  from inside `src/range/` and from tests. Every production read goes through
+  `read()`, one Range request for one tile, because that is the shape Cesium
+  hands us: `Resource.fetchArrayBuffer` is asked for one tile's bytes at a
+  time. So `RangeStats.requestsSaved` and `bytesWasted` are structurally
+  always `0` — measured on a live provider that fetched the root hierarchy
+  page and then one node's chunk: `{"requests":4,"retries":0,
+  "bytesRequested":11797,"bytesWasted":0,"requestsSaved":0}` — and §7 says the
+  256KB gap threshold and the 2% waste cap may move only on measurements from
+  exactly those two numbers.
+  What is needed is a batching layer above `fetchArrayBuffer`: hold the tiles
+  Cesium asks for within one frame, decide which are adjacent enough to merge,
+  issue one `readMany`, and settle each tile's own promise from its own slice.
+  That is design work rather than wiring — Cesium's contract is per-tile and
+  synchronous in its verdict (`undefined` means "ask again next frame"), so
+  the batching layer has to decide how long to hold a tile before answering it
+  and what to do when the frame ends. It is blocked on the `AbortController`
+  entry above: a budget lease held around a `readMany` call has no moment at
+  which it could be returned while a sibling group outlives the call.
+
 ## For the publish sub-project
+
+- **Decide how a Worker bundle reaches `createWorkerHandler` without dragging
+  Cesium in.** `src/index.ts` re-exports it so a caller can build the
+  `spawnWorker` a required option asks for — but that same entry statically
+  re-exports `COPCTilesetProvider`, which statically imports `cesium`. Whether
+  a bundler shakes Cesium out of a Worker's graph is untested, and a Worker
+  that pulls in the whole engine is a large, silent regression. A `./worker`
+  subpath in `exports` would settle it by construction rather than by hoping
+  tree-shaking works.
 
 - **`package.json` needs a `files` field before the first publish.**
   `src/worker/pipeline.ts` cites `docs/superpowers/plans/carried-forward.md`
@@ -148,6 +138,36 @@ rediscovered. Delete an entry when the work lands.
   Cesium's style language and picking (`BATCH_ID` per point, required for
   picking — `src/worker/pnts.ts`'s own doc comment) for free. Decision 6
   puts the glTF transition explicitly after v1, not as a v1 concern.
+
+## For whichever sub-project next touches `src/cesium-runtime/`
+
+- **The hierarchy-page budget is never acquired.** `Budget.acquireHierarchyPage()`
+  has no caller anywhere in `src/` — only its own declaration and
+  implementation, plus tests that call it directly. Measured on a live
+  provider after a real tile fetch, `stats().budget.hierarchy` reads
+  `{"admitted":0,"deferred":0,"rejected":0,"inUse":0,"peak":0}`, and always
+  will. Wiring the call in is not the fix on its own: the registry the codec
+  adds expanded pages to only ever grows — nothing evicts an entry — so a
+  lease acquired per page with nothing ever releasing one would exhaust §7's
+  64 and then defer every further expansion forever, which is worse than not
+  acquiring at all. What is missing first is an eviction policy: which
+  expanded pages may be dropped, what becomes of the tiles Cesium still holds
+  that were built from them, and how a dropped page is rebuilt if traversal
+  comes back. Until that exists, the honest state is an unenforced budget
+  whose stats read zero and say so.
+
+- **No `AbortSignal` reaches anything `src/cesium-runtime/` calls.**
+  `openCopc`, `RangeReader.read` and `WorkerPool.encodeWhenAdmitted` each
+  accept one; the provider, the resource and the codec pass none — the word
+  `signal` does not occur anywhere in `src/cesium-runtime/`. So a tile Cesium
+  cancels when the camera moves on (`Cesium3DTile.cancelRequests`) still runs
+  its Range read to completion, holding its byte-budget and host-slot leases
+  for the whole round trip, and a decode job already posted to a Worker runs
+  to completion too. Nothing leaks — every lease still returns exactly once,
+  as Decision 5 requires — but budget is held against work whose result is
+  discarded, and that budget is what §7's concurrency knobs are tuned from.
+  The wiring is the small half; deciding where the signal comes from is the
+  rest, since Cesium's own cancellation does not hand the codec one.
 
 ## Unscheduled
 
