@@ -76,6 +76,30 @@ rediscovered. Delete an entry when the work lands.
   on purpose rather than a defect — but making it after release means a
   second contract revision.
 
+- **Decide what a caller does with a `deferred` it can never satisfy.**
+  `WorkerPool.encode` returns the budget's own three-way verdict, and
+  `deferred` means "ask again next frame" — which is right when the budget is
+  merely full. It carries nothing that distinguishes that from a `spawn`
+  factory that is permanently broken (a CSP `worker-src` denial, a bundle that
+  will not load). The pool now fails the waiting tasks in that case rather than
+  stalling, so nothing hangs, but a codec reading `verdict === 'deferred'` has
+  no signal to stop retrying. Adding a third `RejectionReason` was considered
+  and rejected here: there is no caller yet to design against, and the type
+  would ripple through code nobody has written. Decide it when
+  `src/cesium-runtime/` exists and its retry loop is real.
+
+- **`EncodeVerdict`'s `admitted` no longer means "this will be attempted".**
+  On the `spawn`/`post` failure paths a caller gets `{ verdict: 'admitted' }`
+  with an already-rejected promise. That is correct — `admitted` is the
+  budget's verdict, not a promise about the Worker — but it is a distinction
+  the first codec author will have to be told rather than discover.
+
+- **Budget stats count admissions that never reached a port.** Measured during
+  the pool's own review: twelve tasks against a throwing `spawn` recorded
+  `admitted: 12` while none ever ran. Correct as admission accounting, and
+  §7's decode row is tuned from these numbers — worth knowing before anyone
+  tunes `decodeJobs` off them.
+
 ## For the range sub-project
 
 - **Link `readMany`'s coalesced group requests under one `AbortController`.**

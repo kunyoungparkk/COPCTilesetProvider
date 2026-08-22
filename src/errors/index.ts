@@ -20,4 +20,10 @@ export {
   RangeTimeoutError,
   RangeUnsupportedError,
 } from './range.js';
-export { PositionCountMismatchError, ZeroPointChunkError } from './worker.js';
+export {
+  PositionCountMismatchError,
+  WorkerTaskFailedError,
+  ZeroPointChunkError,
+} from './worker.js';
+export { fromWire, toWire } from './wire.js';
+export type { WireError } from './wire.js';

@@ -41,3 +41,32 @@ describe('what a Worker can reach through the worker barrel', () => {
     expect(reachable).not.toContain('crs/index.ts');
   });
 });
+
+// entry.ts is what a platform bootstrap (tests/worker-entry-node.ts today;
+// no browser one exists yet) actually loads into a Worker, so the guarantee
+// has to hold at that entry point too, not only at the pipeline barrel it
+// wraps — a message handler pulling in either half of the main thread would
+// defeat the point of drawing this boundary at all.
+describe('what a Worker can reach through worker/entry.ts', () => {
+  const reachable = importClosure('worker/entry.ts');
+
+  // Without this the two exclusions below would pass on an empty result —
+  // a mistyped entry, a changed extension, a regex that stops matching.
+  it('reaches the pipeline, the decoder, and the transform', () => {
+    expect(reachable).toContain('worker/pipeline.ts');
+    expect(reachable).toContain('worker/decode.ts');
+    expect(reachable).toContain('crs/transform.ts');
+  });
+
+  it('cannot reach the registry or the main-thread barrel', () => {
+    expect(reachable).not.toContain('crs/registry.ts');
+    expect(reachable).not.toContain('crs/resolve.ts');
+    expect(reachable).not.toContain('crs/index.ts');
+  });
+
+  // A Worker that pulled the pool in would carry the main thread's half of
+  // the system into every Worker, and nothing else here would notice.
+  it('cannot reach the worker pool', () => {
+    expect(reachable).not.toContain('worker/pool.ts');
+  });
+});

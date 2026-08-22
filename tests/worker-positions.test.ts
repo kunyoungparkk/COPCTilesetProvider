@@ -187,10 +187,12 @@ describe('toRelativePositions', () => {
     // from a true box midpoint to the point sitting at that axis's own
     // extreme (`max - (min+max)/2 == (max-min)/2` identically), so there is
     // no double-precision slack in this bound at all for the correct
-    // implementation. Measured directly: a node-cube-centre origin (Step 5
-    // mutation 1) loosens this to worst relatives of 17.65 / 14.74 / 31.24 m
-    // against true half-extents of 3.72 / 3.39 / 2.94 m; a first-point
-    // origin (mutation 3) loosens the X axis alone to 7.44 m. Once
+    // implementation. Measured directly against two wrong origins: using the
+    // octree node's own cube centre (padded to a power-of-two split of the
+    // root, not the points' own box) loosens this to worst relatives of
+    // 17.65 / 14.74 / 31.24 m against true half-extents of 3.72 / 3.39 /
+    // 2.94 m; using the first point's own coordinates as the origin loosens
+    // the X axis alone to 7.44 m. Once
     // `positions` is float32, though, the extremal point's relative can
     // round a few ULPs past the float64 half-extent — measured, 6.1e-8 m
     // past it here — so the tolerance below is float32's own rounding bound

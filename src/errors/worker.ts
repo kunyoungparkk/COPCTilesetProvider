@@ -65,3 +65,24 @@ export class PositionCountMismatchError extends CopcTilesetError {
     );
   }
 }
+
+/**
+ * Something failed inside a Worker that this library did not throw — laz-perf
+ * rejecting a chunk, V8 refusing an allocation, a bug.
+ *
+ * It stays typed so a caller can branch on it, and it names the original
+ * error rather than paraphrasing: the Worker realm has no stack the main
+ * thread can walk, so the text is all that survives.
+ */
+export class WorkerTaskFailedError extends CopcTilesetError {
+  readonly code = 'worker-task-failed';
+
+  constructor(name: string, message: string) {
+    super(
+      `A Worker failed to encode a tile, with an error this library did not raise:\n\n` +
+        `    ${name}: ${message}\n\n` +
+        'That is either a defect in this library or a file its decoder cannot read. ' +
+        'The original error above is what the Worker realm reported.',
+    );
+  }
+}

@@ -14,6 +14,7 @@ import {
   RangeUnsupportedError,
   UnsupportedHeaderLayoutError,
   WktNotInVlrsError,
+  WorkerTaskFailedError,
   ZeroPointChunkError,
 } from '../src/errors/index.js';
 
@@ -291,6 +292,24 @@ describe('PositionCountMismatchError', () => {
     expect(message).toContain('141'); // 47 * 3
     expect(message).toContain('30');
     expect(message).toContain('toRelativePositions(view, transform)');
+  });
+});
+
+describe('WorkerTaskFailedError', () => {
+  it('gives every error a stable code and the base type', () => {
+    const error = new WorkerTaskFailedError('RangeError', 'Array buffer allocation failed');
+
+    expect(error).toBeInstanceOf(CopcTilesetError);
+    expect(error.code).toBe('worker-task-failed');
+    expect(error.name).toBe('WorkerTaskFailedError');
+  });
+
+  it('names the original error rather than paraphrasing it', () => {
+    const message = new WorkerTaskFailedError('RangeError', 'Array buffer allocation failed').message;
+
+    expect(message).toContain('RangeError');
+    expect(message).toContain('Array buffer allocation failed');
+    expect(message).toContain('Worker');
   });
 });
 
