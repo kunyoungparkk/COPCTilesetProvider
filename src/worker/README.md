@@ -71,10 +71,20 @@ every Worker, and nothing else would notice.
 
 ## Limits worth knowing
 
-No browser bootstrap exists for `entry.ts` yet. `tests/worker-entry-node.ts`
-drives it inside `node:worker_threads` for tests; a browser build needs the
-Rollup Worker bundle OVERVIEW §5 describes, which does not exist yet, so
-nothing in this module currently runs in an actual browser Worker.
+No browser bootstrap **ships** for `entry.ts` yet.
+`tests/worker-entry-node.ts` drives it inside `node:worker_threads` for
+tests, and a shipping browser build needs the Rollup Worker bundle
+OVERVIEW §5 describes, which does not exist.
+
+This module has nevertheless run in a real browser Worker: the render gate
+(`docs/gate-render-findings.md`) loaded `entry.ts` into one and decoded the
+pinned 47-point chunk through it, nine tiles over, with the failure path
+reporting a typed error back across `postMessage`. Two things that run found
+that reading could not. `laz-perf` resolves its `.wasm` against wherever its
+script was served from, so whatever ships this module has to carry or locate
+that file deliberately. And the Worker must not reach `src/index.ts` — the
+package root re-exports `COPCTilesetProvider` and so pulls `cesium` in, which
+does not survive a Worker realm.
 
 The batch table's property names and types — `Classification`, `Intensity`,
 `GpsTime`, `ReturnNumber`, `NumberOfReturns` — become a contract once a
