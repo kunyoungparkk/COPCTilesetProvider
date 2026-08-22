@@ -105,14 +105,33 @@ rediscovered. Delete an entry when the work lands.
 
 ## For the publish sub-project
 
-- **Decide how a Worker bundle reaches `createWorkerHandler` without dragging
-  Cesium in.** `src/index.ts` re-exports it so a caller can build the
-  `spawnWorker` a required option asks for — but that same entry statically
-  re-exports `COPCTilesetProvider`, which statically imports `cesium`. Whether
-  a bundler shakes Cesium out of a Worker's graph is untested, and a Worker
-  that pulls in the whole engine is a large, silent regression. A `./worker`
-  subpath in `exports` would settle it by construction rather than by hoping
-  tree-shaking works.
+- **Give the Worker realm its own entry — the current one does not work.**
+  `src/index.ts` re-exports `createWorkerHandler` so a caller can build the
+  `spawnWorker` a required option asks for, and its doc comment says so. But
+  that same entry statically re-exports `COPCTilesetProvider`, which
+  statically imports `cesium`. The browser render gate measured what that
+  costs: a Worker importing the package root dies on `ReferenceError: global
+  is not defined` inside Cesium before it handles a single message
+  (`docs/gate-render-findings.md`). This is no longer a tree-shaking question
+  to settle — it is a broken documented path. A `./worker` subpath in
+  `exports`, a separate bundle, or both; and `src/index.ts`'s comment stops
+  being true the moment one of them lands.
+
+- **The Worker bundle has to own `laz-perf.wasm`.** laz-perf resolves its
+  `.wasm` relative to wherever its script was served from. The render gate
+  found that under a dev server this lands on a path nothing serves — the SPA
+  fallback answers with `index.html` and the decode dies on `expected magic
+  word 00 61 73 6d, found 3c 21 64 6f`. The gate papered over it with a
+  middleware; a consumer has none. Whatever ships the Worker has to carry or
+  locate this file deliberately (`docs/gate-render-findings.md`).
+
+- **Decide whether the library ships a browser `WorkerPort` adapter.** A
+  browser `Worker` does not satisfy the exported `WorkerPort` type —
+  `onMessage` registers a handler, `Worker.onmessage` is a slot — so every
+  browser caller writes the same ten lines. The render gate wrote them as
+  `browserPort` (`gate/main.ts` on branch `gate/render`). Either ship one or
+  put those ten lines in the README, but a required option a caller cannot
+  satisfy from the package alone is a poor front door.
 
 - **`package.json` needs a `files` field before the first publish.**
   `src/worker/pipeline.ts` cites `docs/superpowers/plans/carried-forward.md`
