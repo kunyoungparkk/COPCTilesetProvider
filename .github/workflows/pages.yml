@@ -1,0 +1,45 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The demo streams a COPC file with Range requests, and the library verifies
+# every response's Content-Range (Decision 4). A browser hides that header
+# unless the server sends Access-Control-Expose-Headers, and the public Autzen
+# bucket does not — measured. Serving the file from Pages alongside the page
+# makes it same-origin, where CORS never applies. The file is fetched here
+# rather than committed: this repository holds no datasets.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the demo dataset
+        run: |
+          mkdir -p examples/data
+          curl -fsSL --retry 3 \
+            https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz \
+            -o examples/data/autzen-classified.copc.laz
+          ls -l examples/data
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: examples
+      - id: deploy
+        uses: actions/deploy-pages@v4

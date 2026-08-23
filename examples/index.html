@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>copc-tileset-provider — live demo</title>
+    <link
+      rel="stylesheet"
+      href="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Widgets/widgets.css"
+    />
+    <style>
+      :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      html, body { margin: 0; height: 100%; background: #000; color: #e6e6e6; }
+      #globe { position: absolute; inset: 0; }
+      #panel {
+        position: absolute; top: 12px; left: 12px; z-index: 10;
+        width: min(420px, calc(100vw - 24px));
+        padding: 14px 16px; border-radius: 10px;
+        background: rgba(18, 18, 20, 0.86); backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        font-size: 13px; line-height: 1.5;
+      }
+      #panel h1 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+      #panel p.sub { margin: 0 0 12px; color: #9aa0a6; font-size: 12px; }
+      label { display: block; margin-bottom: 4px; color: #9aa0a6; font-size: 12px; }
+      .row { display: flex; gap: 8px; }
+      input[type='url'] {
+        flex: 1; min-width: 0; padding: 7px 9px; border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: #0d0d0f; color: #e6e6e6; font: inherit; font-size: 12px;
+      }
+      button {
+        padding: 7px 13px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18);
+        background: #24242a; color: #e6e6e6; font: inherit; font-size: 12px; cursor: pointer;
+      }
+      button:hover:not(:disabled) { background: #303038; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      fieldset { margin: 12px 0 0; padding: 0; border: 0; }
+      fieldset legend { padding: 0; color: #9aa0a6; font-size: 12px; }
+      .toggles { display: flex; gap: 14px; margin-top: 6px; }
+      .toggles label { display: flex; align-items: center; gap: 6px; margin: 0; color: #e6e6e6; }
+      #status {
+        margin-top: 12px; padding: 9px 10px; border-radius: 6px;
+        background: #0d0d0f; border: 1px solid rgba(255, 255, 255, 0.1);
+        white-space: pre-wrap; word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+      }
+      #status.error { border-color: #a3352f; color: #ffb4ae; }
+      #status.ok { border-color: #2f6b3a; }
+      a { color: #8ab4f8; }
+    </style>
+  </head>
+  <body>
+    <div id="globe"></div>
+
+    <div id="panel">
+      <h1>copc-tileset-provider</h1>
+      <p class="sub">
+        A COPC file streamed straight into CesiumJS — no pre-tiling, no backend.
+        <a href="https://github.com/kunyoungparkk/COPCTilesetProvider">source</a>
+      </p>
+
+      <label for="url">COPC URL</label>
+      <div class="row">
+        <input id="url" type="url" spellcheck="false" />
+        <button id="load" type="button">Load</button>
+      </div>
+
+      <fieldset>
+        <legend>Classification filter (Cesium3DTileStyle)</legend>
+        <div class="toggles">
+          <label><input id="ground" type="checkbox" checked /> Ground</label>
+          <label><input id="colorByClass" type="checkbox" /> Colour by class</label>
+        </div>
+      </fieldset>
+
+      <div id="status">idle</div>
+    </div>
+
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "cesium": "./cesium-shim.js",
+          "copc-tileset-provider": "https://esm.sh/copc-tileset-provider@0.1.1?external=cesium"
+        }
+      }
+    </script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
