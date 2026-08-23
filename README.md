@@ -6,7 +6,7 @@
 Stream static [COPC](https://copc.io/) point clouds into [CesiumJS](https://cesium.com/platform/cesiumjs/) — no pre-tiling, no backend, no conversion step.
 
 [![CI](https://github.com/kunyoungparkk/COPCTilesetProvider/actions/workflows/ci.yml/badge.svg)](https://github.com/kunyoungparkk/COPCTilesetProvider/actions/workflows/ci.yml)
-<!-- npm version badge goes here once the package is published. -->
+[![npm](https://img.shields.io/npm/v/copc-tileset-provider.svg)](https://www.npmjs.com/package/copc-tileset-provider)
 
 A COPC file is a LAZ file whose points are already sorted into an octree. That
 means the parts you need can be read with HTTP Range requests from any static
@@ -24,26 +24,17 @@ viewer.scene.primitives.add(provider);
 viewer.camera.flyTo({ destination: provider.extent });
 ```
 
-## Status
-
-**Not published to npm yet.** The library builds, bundles and renders — a
-publish smoke test packs a tarball, installs it into a throwaway project, and
-renders it in headless Chromium on every run — but nothing has been released,
-so there is no version to install and no API stability promise.
-
-To try it today, clone this repository and build:
+## Install
 
 ```sh
-npm ci
-npm run build     # → dist/index.js, dist/worker.js, dist/types/
+npm install copc-tileset-provider cesium
 ```
 
-then depend on the tarball `npm pack` produces.
-
-<!-- On first publish, replace this whole section with:
-       ## Install
-       npm install copc-tileset-provider cesium
-     and drop the tarball paragraph. -->
+Published as [`copc-tileset-provider`](https://www.npmjs.com/package/copc-tileset-provider).
+The version is `0.x` on purpose: the library builds, bundles and renders — a
+publish smoke test packs a tarball, installs it into a throwaway project and
+renders it in headless Chromium on every run — but the API has not been lived
+with by anyone outside this repository yet, so it may still move.
 
 Cesium is a peer dependency, pinned to the versions this library was verified
 against:
