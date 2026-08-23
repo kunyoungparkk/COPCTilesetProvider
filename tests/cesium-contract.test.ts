@@ -59,7 +59,7 @@ function expectSnippet(source: string, snippet: string): void {
 
 describe('Cesium runtime content codec contract', () => {
   it('runs against a Cesium version Decision 2 was verified on', () => {
-    expect(version).toMatch(/^1\.(142|143)\./);
+    expect(version).toMatch(/^1\.(142|143|144)\./);
   });
 
   it('keeps the codec slot we install onto the tileset', () => {

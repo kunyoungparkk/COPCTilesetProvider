@@ -37,10 +37,11 @@ renders it in headless Chromium on every run — but the API has not been lived
 with by anyone outside this repository yet, so it may still move.
 
 Cesium is a peer dependency, pinned to the versions this library was verified
-against:
+against. Both ends of that range are rendered in a real browser before it is
+widened — 1.142.0 and 1.144.0 at the time of writing:
 
 ```json
-"peerDependencies": { "cesium": ">=1.142.0 <1.144.0" }
+"peerDependencies": { "cesium": ">=1.142.0 <1.145.0" }
 ```
 
 ## Quick start
@@ -202,8 +203,11 @@ resolves the Node build instead needs an alias to `laz-perf/lib/web/index.js`.
 Only the Vite path is actually measured — the publish smoke builds with it.
 
 **Also out of scope for v1:** writing or editing COPC, plain LAS/LAZ files, an
-exact global point budget, Cesium 1.141 and earlier, WebGL 1, and 2D or Columbus
-View.
+exact global point budget, WebGL 1, and 2D or Columbus View.
+
+Cesium 1.141 and earlier is not a choice: the `_runtimeContentCodec` slot this
+library installs onto arrived in 1.142, so on anything older the mechanism it
+depends on does not exist.
 
 ## API
 

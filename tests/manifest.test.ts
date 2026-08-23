@@ -26,7 +26,7 @@ describe('package manifest', () => {
   });
 
   it('accepts only the Cesium versions Decision 2 was verified against', () => {
-    expect(manifest.peerDependencies).toEqual({ cesium: '>=1.142.0 <1.144.0' });
+    expect(manifest.peerDependencies).toEqual({ cesium: '>=1.142.0 <1.145.0' });
   });
 
   it('declares no runtime dependency beyond the three OVERVIEW §5 names', () => {

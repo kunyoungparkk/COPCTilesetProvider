@@ -16,7 +16,10 @@ import { buildFixture } from './fixture.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const PORT = Number(process.env.SMOKE_PORT ?? 8933);
-const CESIUM = 'cesium@1.143.0';
+// Which Cesium the consumer project installs. Overridable so the smoke can
+// verify both ends of the supported peer range, which is the only way an
+// expanded range means anything: `SMOKE_CESIUM=1.142.0 npm run smoke`.
+const CESIUM = `cesium@${process.env.SMOKE_CESIUM ?? '1.144.0'}`;
 
 const run = (cmd, args, cwd) =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });

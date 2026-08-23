@@ -25,10 +25,13 @@ Cesium이 타일 bytes를 받은 뒤 콘텐츠 생성을 위임하는 내부 슬
 first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므로:
 
 - 모든 내부 접근을 `src/cesium-runtime/` 한 곳에 격리 (정적 검사로 강제)
-- 지원 버전을 검증된 1.142.0~1.143.x로 제한 (peer dependency)
+- 지원 버전을 검증된 1.142.0~1.144.x로 제한 (peer dependency)
 - 경계 규칙: source는 Cesium을 모른다. cesium-runtime 밖에서 underscore
   필드·factory 접근 시 정적 검사가 빌드를 실패시킨다.
-- 검증 현황: **hard gate 통과**(1.143.0, headless Chromium). 계약은 미지수가 아니라 Cesium 소스에
+- 검증 현황: **범위 양 끝이 렌더로 검증됨**(1.142.0과 1.144.0, headless Chromium —
+  각각 47점·20픽셀, provider 없는 대조군 0픽셀). 최초 hard gate는 1.143.0에서 통과했다.
+  하한이 1.142인 것은 선택이 아니라 실측이다: 1.141에는 `_runtimeContentCodec` 슬롯
+  자체가 없어 계약 테스트 4개가 깨진다. 계약은 미지수가 아니라 Cesium 소스에
   문서화돼 있고(`Cesium3DTileset.js`의 `_runtimeContentCodec` JSDoc), first-party `MVTDataProvider`가
   같은 패턴으로 콘텐츠 전체를 공급한다. 게이트는 Cesium이 파싱할 수 없는 마커 바이트를 서빙해
   point 타일 렌더·hierarchy의 external tileset 확장·음성 대조군(코덱 미설치 시 FAILED, 0픽셀)까지 확인했다.
@@ -38,7 +41,10 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
   2. 코덱 분기는 조기 return이라 Cesium의 콘텐츠 분류를 통째로 건너뛴다. `hasTilesetContent`·
      `hasRenderableContent`·`content.metadata`·`content.group`은 코덱이 직접 세팅해야 한다.
      hierarchy를 external tileset으로 확장할 때 이걸 빠뜨리면 서브트리가 아예 열리지 않는다.
-  3. 코덱의 `disableSkipLevelOfDetail` 필드는 문서에만 있고 1.143에서 읽는 코드가 없다.
+  3. 코덱의 `disableSkipLevelOfDetail` 필드는 문서에만 있고 1.142~1.144 어디에도
+     읽는 코드가 없다. 1.144가 읽는 것은 `tileset._disableSkipLevelOfDetail`이라는
+     다른 필드이고, 그것마저 `preprocess3DTileContent` 뒤 — 코덱 분기가 이미 return한
+     자리다.
      `skipLevelOfDetail`은 tileset 생성 옵션으로 넘긴다.
 - 회귀 가드: 설치된 Cesium 소스에서 계약 문자열(예: `this._runtimeContentCodec = undefined`)의 존재를 확인하는 오프라인 정적 검사를 CI에 둔다.
   브라우저 없이, Cesium 버전이 바뀌어 이 결합이 깨지는 순간을 잡기 위함이다.
@@ -139,7 +145,7 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
     계약 문자열 검사는 파일 문자열 탐색이라 영향받지 않는다.
 - 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
   이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
-- Cesium: peer `>=1.142.0 <1.144.0` (번들에 포함하지 않음)
+- Cesium: peer `>=1.142.0 <1.145.0` (번들에 포함하지 않음)
 - 빌드: rolldown(라이브러리+자체완결 Worker 번들), Vite(데모·테스트 앱)
   - Rollup으로 적었던 자리다. 순정 Rollup은 TypeScript를 스스로 벗지 못해
     트랜스폼 플러그인이 필요한데, `@rollup/plugin-typescript`는 바로 위 항목이
@@ -165,7 +171,9 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
 - 정확한 전역 point budget
 - 정표고(geoid) 보정 — 높이는 타원체고(HAE)로 취급하고 이 한계를 README에 명시한다.
   정표고 기반 데이터는 수직 오프셋이 보일 수 있다. (선행 구현들과 동일한 범위 설정)
-- Cesium 1.141 이하, WebGL1, 2D/Columbus View
+- Cesium 1.141 이하 — 비목표가 아니라 불가능하다. `_runtimeContentCodec` 슬롯이
+  1.142에서 들어왔고, 그 이전 버전에서는 Decision 2의 메커니즘이 존재하지 않는다(실측).
+- WebGL1, 2D/Columbus View
 
 ## 7. 튜닝 노브 — 초기값과 개선 여지
 
