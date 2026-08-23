@@ -103,35 +103,6 @@ rediscovered. Delete an entry when the work lands.
   entry above: a budget lease held around a `readMany` call has no moment at
   which it could be returned while a sibling group outlives the call.
 
-## For whichever sub-project first ships a root README
-
-- **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
-  no root `README.md` exists yet. `src/crs/ecef.ts` and `src/crs/README.md`
-  carry the fact; the user-facing page does not.
-
-- **State that PNTS is 3D Tiles 1.0 legacy, with the adoption rationale, and
-  place the glTF transition after v1.** OVERVIEW §3 Decision 6 requires all
-  three, and none of them is in a user-facing page yet because none exists.
-  The rationale itself: a hand-rolled Worker encoder (header + feature table
-  + binary) is simpler than assembling glTF, and a batch table gives
-  Cesium's style language and picking (`BATCH_ID` per point, required for
-  picking — `src/worker/pnts.ts`'s own doc comment) for free. Decision 6
-  puts the glTF transition explicitly after v1, not as a v1 concern.
-
-- **State that the default Worker comes from a `blob:` URL.** `fromUrl` builds
-  it from the bundle inlined into the library, so a strict `worker-src` policy
-  that forbids `blob:` blocks it outright. The library cannot fix that; the way
-  out is `spawnWorker` with `browserPort`, or importing
-  `copc-tileset-provider/worker` in a Worker module of the caller's own. Both
-  ship for this reason and neither is discoverable without being written down.
-
-- **State that a bundler ignoring `browser` fields will break.** `copc` is an
-  external dependency, so a consumer's bundler resolves `laz-perf` itself, and
-  what keeps it off the Node build — with its `require("fs")` — is laz-perf's
-  own `"browser": "lib/web/index.js"`. A toolchain that ignores that field
-  fails. The publish smoke builds with Vite, which honours it, so this path is
-  unmeasured (`smoke/README.md`).
-
 ## For whichever sub-project next touches `src/cesium-runtime/`
 
 - **A decode job cannot be cancelled, and the reason is Cesium's, not ours.**
