@@ -67,6 +67,15 @@ export interface CodecContext {
    * this module keeps adding to, not a snapshot taken at construction.
    */
   readonly synthesizedAncestors: { count: number };
+  /**
+   * How many hierarchy sub-pages this codec has expanded, boxed and held by
+   * reference for the same reason `synthesizedAncestors` is.
+   *
+   * A count of pages expanded, not of pages retained — nothing retains a
+   * parsed page. What survives an expansion is the `TileEntry` values it
+   * contributed to `entries`, which `ProviderStats.registryEntries` counts.
+   */
+  readonly hierarchyPagesExpanded: { count: number };
 }
 
 /**
@@ -191,6 +200,8 @@ export function createCodec(context: CodecContext): RuntimeContentCodec {
         context.entries.set(uri, subEntry);
       }
       context.synthesizedAncestors.count += built.synthesizedAncestors;
+      context.hierarchyPagesExpanded.count += 1;
+
 
       // Left to the codec because the early return above skips the branch in
       // `Cesium3DTile.js` that would otherwise set them

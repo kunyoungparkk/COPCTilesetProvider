@@ -6,7 +6,6 @@ import { createLease, type Lease, type OutstandingLease } from './lease.js';
 // update to that table.
 const DEFAULT_RANGE_BODY_BYTES = 32 * 1024 * 1024;
 const DEFAULT_DECODE_JOBS = 8; // worker pool of 4, times 2
-const DEFAULT_HIERARCHY_PAGES = 64;
 const DEFAULT_HOST_REQUESTS_PER_ORIGIN = 6;
 
 /**
@@ -24,11 +23,10 @@ export type Admission =
   | { readonly verdict: 'deferred' }
   | { readonly verdict: 'rejected'; readonly reason: RejectionReason };
 
-/** The four §7 values this budget enforces. Constructor options, not public API. */
+/** The three §7 values this budget enforces. Constructor options, not public API. */
 export interface BudgetLimits {
   readonly rangeBodyBytes: number;
   readonly decodeJobs: number;
-  readonly hierarchyPages: number;
   readonly hostRequestsPerOrigin: number;
 }
 
@@ -43,7 +41,6 @@ export interface BudgetLimits {
 export interface BudgetStats {
   readonly rangeBody: BudgetCounterStats;
   readonly decode: BudgetCounterStats;
-  readonly hierarchy: BudgetCounterStats;
   /**
    * This provider's own view of the host-slot budget, not the shared
    * per-origin state that actually gates admission (see `host-registry.ts`).
@@ -78,8 +75,6 @@ export interface Budget {
   acquireRangeRequest(origin: string, bytes: number): Admission;
   /** One concurrent decode job (OVERVIEW §7: worker pool size × 2). */
   acquireDecodeJob(): Admission;
-  /** One retained, parsed hierarchy page (OVERVIEW §7). */
-  acquireHierarchyPage(): Admission;
   /** Per-resource admitted/deferred/rejected counts and current/peak usage — see `BudgetStats`. */
   stats(): BudgetStats;
   /**
@@ -105,7 +100,6 @@ export function createBudget(limits?: Partial<BudgetLimits>): Budget {
 class BudgetImpl implements Budget {
   private readonly rangeBody: Counter;
   private readonly decode: Counter;
-  private readonly hierarchy: Counter;
   private readonly hostRequestsPerOrigin: number;
   // This provider's own mirror of the host-slot budget — see the full
   // explanation on `BudgetStats.hostRequests`. Capacity here is infinite
@@ -119,7 +113,6 @@ class BudgetImpl implements Budget {
   constructor(limits?: Partial<BudgetLimits>) {
     this.rangeBody = new Counter(limits?.rangeBodyBytes ?? DEFAULT_RANGE_BODY_BYTES);
     this.decode = new Counter(limits?.decodeJobs ?? DEFAULT_DECODE_JOBS);
-    this.hierarchy = new Counter(limits?.hierarchyPages ?? DEFAULT_HIERARCHY_PAGES);
     this.hostRequestsPerOrigin = limits?.hostRequestsPerOrigin ?? DEFAULT_HOST_REQUESTS_PER_ORIGIN;
   }
 
@@ -176,10 +169,6 @@ class BudgetImpl implements Budget {
     return this.acquireSingle(this.decode);
   }
 
-  acquireHierarchyPage(): Admission {
-    return this.acquireSingle(this.hierarchy);
-  }
-
   private acquireSingle(counter: Counter): Admission {
     if (this.destroyed) {
       counter.recordRejected();
@@ -208,7 +197,6 @@ class BudgetImpl implements Budget {
     return {
       rangeBody: this.rangeBody.stats(),
       decode: this.decode.stats(),
-      hierarchy: this.hierarchy.stats(),
       hostRequests: this.hostRequests.stats(),
     };
   }

@@ -72,6 +72,17 @@ export interface COPCTilesetProviderOptions {
    * substituted.)
    */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Aborts the three reads `fromUrl` makes before it can return
+   * (OVERVIEW §4).
+   *
+   * Cesium's own cancellation does not reach here — there is no tile and no
+   * request yet — so this is the caller's channel, for a component unmounted
+   * mid-load. Tile requests are cancelled by Cesium instead
+   * (`cancellation.ts`), and this signal is not forwarded to them: it would
+   * outlive the load it was meant to bound and cancel every later tile.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface ProviderStats {
@@ -89,6 +100,20 @@ export interface ProviderStats {
    * across the life of this provider.
    */
   readonly synthesizedAncestors: number;
+  /**
+   * Tile descriptors the registry holds right now.
+   *
+   * It only grows. An entry cannot be dropped: Cesium re-requests an unloaded
+   * tile by the same URI, and a missing entry throws
+   * `UnknownTileRequestError`, which fails that tile terminally. Bounding this
+   * would need an eviction policy keyed on Cesium's content lifecycle, and
+   * nothing has measured a need for one — this number is how such a need
+   * would first be noticed. OVERVIEW §7 carried a "hierarchy page cache" knob
+   * until this replaced it; no parsed page was ever retained for it to bound.
+   */
+  readonly registryEntries: number;
+  /** Hierarchy sub-pages expanded so far. Only grows. */
+  readonly hierarchyPagesExpanded: number;
 }
 
 /**
@@ -193,6 +218,8 @@ export class COPCTilesetProvider {
   readonly #budget: Budget;
   readonly #workerPool: WorkerPool;
   readonly #synthesizedAncestors: { count: number };
+  readonly #entries: ReadonlyMap<string, TileEntry>;
+  readonly #hierarchyPagesExpanded: { count: number };
   readonly #blobUrl: string;
   #destroyed = false;
 
@@ -203,6 +230,8 @@ export class COPCTilesetProvider {
     budget: Budget;
     workerPool: WorkerPool;
     synthesizedAncestors: { count: number };
+    entries: ReadonlyMap<string, TileEntry>;
+    hierarchyPagesExpanded: { count: number };
     blobUrl: string;
   }) {
     this.tileset = init.tileset;
@@ -211,6 +240,8 @@ export class COPCTilesetProvider {
     this.#budget = init.budget;
     this.#workerPool = init.workerPool;
     this.#synthesizedAncestors = init.synthesizedAncestors;
+    this.#entries = init.entries;
+    this.#hierarchyPagesExpanded = init.hierarchyPagesExpanded;
     this.#blobUrl = init.blobUrl;
   }
 
@@ -271,7 +302,7 @@ export class COPCTilesetProvider {
     const workerPoolSize = options.workerPoolSize ?? DEFAULT_POOL_SIZE;
     const budget = createBudget({ decodeJobs: workerPoolSize * 2 });
 
-    const file = await openCopc(reader);
+    const file = await openCopc(reader, options.signal);
 
     const definition = resolveCrsDefinition(file.wkt);
     const transform = createTransformFromDefinition(definition);
@@ -304,6 +335,10 @@ export class COPCTilesetProvider {
     // being lost the way discarding `buildTileset`'s per-call return value
     // would lose it.
     const synthesizedAncestors = { count: built.synthesizedAncestors };
+    // Boxed for the same reason, and counted here rather than derived from
+    // `entries`: a page can contribute no new entry at all (every key already
+    // known), so the two numbers answer different questions.
+    const hierarchyPagesExpanded = { count: 0 };
 
     const interceptContext: InterceptContext = {
       reader,
@@ -356,6 +391,7 @@ export class COPCTilesetProvider {
       entries,
       tilesetContext,
       synthesizedAncestors,
+      hierarchyPagesExpanded,
     } satisfies CodecContext);
 
     return new COPCTilesetProvider({
@@ -365,6 +401,8 @@ export class COPCTilesetProvider {
       budget,
       workerPool,
       synthesizedAncestors,
+      entries,
+      hierarchyPagesExpanded,
       blobUrl,
     });
   }
@@ -379,6 +417,8 @@ export class COPCTilesetProvider {
       range: this.#rangeReader.stats(),
       budget: this.#budget.stats(),
       synthesizedAncestors: this.#synthesizedAncestors.count,
+      registryEntries: this.#entries.size,
+      hierarchyPagesExpanded: this.#hierarchyPagesExpanded.count,
     };
   }
 

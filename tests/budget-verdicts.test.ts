@@ -25,21 +25,6 @@ describe('acquireDecodeJob', () => {
   });
 });
 
-describe('acquireHierarchyPage', () => {
-  it('admits pages up to the configured capacity and defers beyond it', () => {
-    const budget = createBudget({ hierarchyPages: 1 });
-
-    expect(budget.acquireHierarchyPage().verdict).toBe('admitted');
-    expect(budget.acquireHierarchyPage().verdict).toBe('deferred');
-  });
-
-  it('rejects as over-capacity when the whole budget has no room, not deferred', () => {
-    const budget = createBudget({ hierarchyPages: 0 });
-
-    expect(budget.acquireHierarchyPage()).toEqual({ verdict: 'rejected', reason: 'over-capacity' });
-  });
-});
-
 describe('acquireRangeRequest — the byte budget', () => {
   it('draws the line between a recoverable and a permanent refusal at the budget total', () => {
     const budget = createBudget({ rangeBodyBytes: 100, hostRequestsPerOrigin: 100 });
@@ -170,11 +155,10 @@ describe('a row can legitimately record nothing for a call it took part in', () 
 
 describe('rejection has exactly two causes', () => {
   it('rejects every acquire call once the budget is destroyed, even one that would otherwise fit', () => {
-    const budget = createBudget({ decodeJobs: 4, hierarchyPages: 4, rangeBodyBytes: 1_000_000, hostRequestsPerOrigin: 4 });
+    const budget = createBudget({ decodeJobs: 4, rangeBodyBytes: 1_000_000, hostRequestsPerOrigin: 4 });
     budget.destroy();
 
     expect(budget.acquireDecodeJob()).toEqual({ verdict: 'rejected', reason: 'destroyed' });
-    expect(budget.acquireHierarchyPage()).toEqual({ verdict: 'rejected', reason: 'destroyed' });
     expect(budget.acquireRangeRequest(uniqueOrigin(), 1)).toEqual({
       verdict: 'rejected',
       reason: 'destroyed',

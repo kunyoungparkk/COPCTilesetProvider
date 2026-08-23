@@ -413,7 +413,7 @@ describe('LeaseAlreadyReleasedError', () => {
     // whose bug it is rather than suggest a retry.
     expect(error.message).toContain('acquireRangeRequest');
     expect(error.message).toContain('acquireDecodeJob');
-    expect(error.message).toContain('acquireHierarchyPage');
+    expect(error.message).toContain('acquireDecodeJob');
     expect(error.message).toContain('exactly once');
     expect(error.message).toContain('bug in the caller');
   });

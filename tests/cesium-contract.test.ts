@@ -138,4 +138,29 @@ describe('Cesium runtime content codec contract', () => {
     expect(Model3DTileContent?.fromPnts).toBeTypeOf('function');
     expect(Tileset3DTileContent?.fromJson).toBeTypeOf('function');
   });
+  // Why `resource.ts` aborts a Range read: a rejected request whose
+  // `cancelled` flag is set puts the tile back rather than failing it, so a
+  // tile the camera moved past is simply asked again later.
+  it('treats a cancelled request as try-again, not as a failure', () => {
+    expectSnippet(
+      tile,
+      'if (request.cancelled || request.state === RequestState.CANCELLED) { ' +
+        '// Cancelled due to low priority - try again later. ' +
+        'tile._contentState = previousState;',
+    );
+  });
+
+  // Why nothing here aborts a decode. The catch around `makeContent` does not
+  // consult `cancelled`, so an aborted decode is a terminal FAILED — worse
+  // than the worker slot it would save. If this assertion fails because
+  // Cesium added the check, decode cancellation becomes available;
+  // `docs/superpowers/plans/carried-forward.md` says so in the same words.
+  it('fails a tile whose content creation throws, cancelled or not', () => {
+    const makeContent = tile.indexOf('const content = await makeContent(tile, arrayBuffer);');
+    expect(makeContent).toBeGreaterThan(-1);
+    const after = tile.slice(makeContent);
+    const failed = after.indexOf('tile._contentState = Cesium3DTileContentState.FAILED;');
+    expect(failed).toBeGreaterThan(-1);
+    expect(after.slice(0, failed)).not.toContain('request.cancelled');
+  });
 });

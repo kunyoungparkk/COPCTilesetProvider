@@ -1,6 +1,6 @@
 # cesium-runtime
 
-The only place in this library that touches CesiumJS. `COPCTilesetProvider.fromUrl(url, options)` (`provider.ts`) opens a COPC file, builds a synthetic 3D Tiles document from it, and installs a codec onto a real `Cesium3DTileset` before handing that tileset back inside the returned `COPCTilesetProvider` — a `scene.primitives.add(...)`-able object that delegates `update`/`updateForPass`/`prePassesUpdate`/`postPassesUpdate`/`destroy` to it, and adds `stats()`, `tileset`, and `extent` of its own. `ScheduledRangeResource` (`resource.ts`) intercepts every tile request Cesium's traversal makes and answers it from the budget instead of the network; `createCodec` (`codec.ts`) turns the bytes that interception admits into `Cesium3DTileContent`, installed onto the private `_runtimeContentCodec` slot (OVERVIEW §3, Decision 2). Point styling and classification filters are `Cesium3DTileStyle`'s job, untouched here.
+The only place in this library that touches CesiumJS. `COPCTilesetProvider.fromUrl(url, options)` (`provider.ts`) opens a COPC file, builds a synthetic 3D Tiles document from it, and installs a codec onto a real `Cesium3DTileset` before handing that tileset back inside the returned `COPCTilesetProvider` — a `scene.primitives.add(...)`-able object that delegates `update`/`updateForPass`/`prePassesUpdate`/`postPassesUpdate`/`destroy` to it, and adds `stats()`, `tileset`, and `extent` of its own. `ScheduledRangeResource` (`resource.ts`) intercepts every tile request Cesium's traversal makes and answers it from the budget instead of the network; `createCodec` (`codec.ts`) turns the bytes that interception admits into `Cesium3DTileContent`, installed onto the private `_runtimeContentCodec` slot (OVERVIEW §3, Decision 2). `signalForRequest` (`cancellation.ts`) turns Cesium's own tile cancellation into an `AbortSignal`, so a tile the camera moved past stops holding its byte budget and host slot. Point styling and classification filters are `Cesium3DTileStyle`'s job, untouched here.
 
 ## What Decision 2's early return shifts onto this module
 
@@ -17,3 +17,21 @@ Nothing under `src/` proves that any of this renders a point cloud. The suite he
 `COPCTilesetProviderOptions.spawnWorker` is required, not optional, because nothing in this module can build a `WorkerPort` on its own: that needs the self-contained Worker bundle the bundling sub-project has not shipped yet (OVERVIEW §5). A caller supplies the factory until then.
 
 OVERVIEW §3, Decisions 1, 2, and 6.
+
+## Cancellation reaches reads, not decodes
+
+Cesium cancels a tile that is still `LOADING` a frame after it left view, and
+`Request.prototype.cancel` does nothing but set `this.cancelled = true`.
+`cancellation.ts` wraps that one call — on the instance, never the prototype —
+and `ScheduledRangeResource` hands the resulting signal to `RangeReader.read`.
+
+Decodes are left alone deliberately. `Cesium3DTile.js` has two catch blocks
+and only one of them consults `cancelled`: the one around the request promise
+restores the tile's previous state, while the one around `makeContent` goes
+straight to `FAILED`, which is terminal. Aborting a decode would trade a
+worker slot for a permanently dead tile. `tests/cesium-contract.test.ts` pins
+both blocks, so the day Cesium closes that gap the suite says so.
+
+`COPCTilesetProviderOptions.signal` is a separate channel, for the three reads
+`fromUrl` makes before any tile exists. It is not forwarded to tile requests —
+scoped to the load, it would otherwise outlive it and cancel everything after.

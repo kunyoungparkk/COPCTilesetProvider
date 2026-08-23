@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { Cesium3DTileset, Rectangle } from 'cesium';
+import type { Resource } from 'cesium';
 import { describe, expect, it, vi } from 'vitest';
 import { COPCTilesetProvider, validateTokenBase } from '../src/cesium-runtime/provider.js';
 import { ScheduledRangeResource } from '../src/cesium-runtime/resource.js';
@@ -443,5 +444,140 @@ describe('validateTokenBase', () => {
         message: expect.stringContaining('"copc://a1b2c3/x%20y/"'),
       }),
     );
+  });
+});
+
+// `ProviderStats`'s two registry numbers are read live off the objects the
+// codec keeps mutating. A snapshot taken at construction would satisfy every
+// other test in this file — measured by mutation: replacing
+// `this.#hierarchyPagesExpanded.count` with a literal `0` broke nothing until
+// this block existed.
+describe('what the registry numbers measure', () => {
+  // Entry 38 of the pinned root page is the deepest one it names (depth 5),
+  // and the page names nothing deeper — so rewriting it as a page pointer
+  // cannot orphan a descendant the page already listed. The page keeps its
+  // declared 8,896 bytes, which is what the info VLR says to read.
+  const DEEPEST_ENTRY = 38;
+  const ENTRY_BYTES = 32;
+  const SUB_PAGE_OFFSET = 81_000_000;
+  const SUB_CHUNK = { offset: 79_000_000, length: 512, pointCount: 91 };
+
+  /** The root page with its deepest entry turned into a pointer at a sub-page. */
+  function rootWithPagePointer(): { page: Uint8Array; key: readonly number[] } {
+    const page = new Uint8Array(ROOT_HIERARCHY);
+    const view = new DataView(page.buffer, page.byteOffset, page.byteLength);
+    const at = DEEPEST_ENTRY * ENTRY_BYTES;
+    const key = [
+      view.getInt32(at, true),
+      view.getInt32(at + 4, true),
+      view.getInt32(at + 8, true),
+      view.getInt32(at + 12, true),
+    ];
+    view.setBigUint64(at + 16, BigInt(SUB_PAGE_OFFSET), true);
+    view.setInt32(at + 24, ENTRY_BYTES, true);
+    view.setInt32(at + 28, -1, true); // COPC 1.0: -1 means "this is a page"
+    return { page, key };
+  }
+
+  /** One point node, one level below `key` — what the sub-page contains. */
+  function subPage(key: readonly number[]): Uint8Array {
+    const bytes = new Uint8Array(ENTRY_BYTES);
+    const view = new DataView(bytes.buffer);
+    view.setInt32(0, (key[0] ?? 0) + 1, true);
+    view.setInt32(4, (key[1] ?? 0) * 2, true);
+    view.setInt32(8, (key[2] ?? 0) * 2, true);
+    view.setInt32(12, (key[3] ?? 0) * 2, true);
+    view.setBigUint64(16, BigInt(SUB_CHUNK.offset), true);
+    view.setInt32(24, SUB_CHUNK.length, true);
+    view.setInt32(28, SUB_CHUNK.pointCount, true);
+    return bytes;
+  }
+
+  it('counts the registry live, and a page expansion moves both numbers', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const { page, key } = rootWithPagePointer();
+    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
+      spawnWorker: () => {
+        throw new Error('no point tile is decoded by this test');
+      },
+      fetch: fixtureFetch([
+        { offset: 0, bytes: HEAD },
+        { offset: 375, bytes: VLRS },
+        { offset: 81_114_146, bytes: page },
+        { offset: SUB_PAGE_OFFSET, bytes: subPage(key) },
+      ]).fetch,
+    });
+
+    try {
+      const before = provider.stats();
+      // The root page's own entries are already registered — `fromUrl` built
+      // the tileset from them — and nothing has expanded a sub-page.
+      expect(before.registryEntries).toBeGreaterThan(0);
+      expect(before.hierarchyPagesExpanded).toBe(0);
+
+      // Drive the hierarchy tile the way a traversal would: same tokenBase,
+      // the `h/` shape `buildTileset` emits for a page pointer.
+      const rootResource = (provider.tileset.root as unknown as { _contentResource: Resource })
+        ._contentResource;
+      const pageResource = rootResource.clone();
+      pageResource.url = `${rootResource.url.slice(0, -'n/0-0-0-0'.length)}h/${key.join('-')}`;
+      const pageBytes = await pageResource.fetchArrayBuffer();
+      expect(pageBytes?.byteLength).toBe(ENTRY_BYTES);
+
+      const codec = (
+        provider.tileset as unknown as {
+          _runtimeContentCodec: {
+            createContent: (...args: unknown[]) => Promise<unknown>;
+          };
+        }
+      )._runtimeContentCodec;
+      // A stubbed tileset, as `tests/cesium-codec.test.ts` uses: handing the
+      // real one would have Cesium build the sub-tree for real, which needs a
+      // parent tile with a `computedTransform` and tests Cesium rather than
+      // the two numbers this block is about. The registry mutation happens
+      // before `Tileset3DTileContent.fromJson` is ever called.
+      const tile = { hasRenderableContent: true, hasTilesetContent: false };
+      await codec.createContent({ loadTileset: vi.fn() }, tile, pageResource, pageBytes);
+      expect(tile.hasTilesetContent).toBe(true);
+
+      const after = provider.stats();
+      expect(after.hierarchyPagesExpanded).toBe(1);
+      // The sub-page's own node joined the registry the root page's entries
+      // are in — one map, mutated by the codec, read live here.
+      expect(after.registryEntries).toBeGreaterThan(before.registryEntries);
+    } finally {
+      provider.destroy();
+    }
+  });
+});
+
+describe('fromUrl and the caller signal', () => {
+  it('lets the caller abort the reads fromUrl makes', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      COPCTilesetProvider.fromUrl(FILE_URL, {
+        spawnWorker: () => {
+          throw new Error('no Worker is spawned by an aborted load');
+        },
+        fetch: autzenFetch().fetch,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('loads normally when no signal is given', async () => {
+    // Without this the assertion above would pass on a `fromUrl` that always
+    // rejected.
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
+      spawnWorker: () => {
+        throw new Error('no Worker is spawned by this test');
+      },
+      fetch: autzenFetch().fetch,
+    });
+    provider.destroy();
   });
 });

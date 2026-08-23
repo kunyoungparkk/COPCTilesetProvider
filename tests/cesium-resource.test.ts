@@ -54,9 +54,6 @@ function fakeBudget(admission: Admission): Budget {
     acquireDecodeJob: () => {
       throw new Error('not exercised by this test');
     },
-    acquireHierarchyPage: () => {
-      throw new Error('not exercised by this test');
-    },
     stats: () => {
       throw new Error('not exercised by this test');
     },
@@ -167,7 +164,12 @@ describe('a registry hit', () => {
 
     await expect(resource.fetchArrayBuffer()).resolves.toBe(bytes);
 
-    expect(read).toHaveBeenCalledWith({ offset: 1000, length: 47 });
+    // The signal comes with the range, always: `Resource`'s constructor
+    // assigns `this.request = options.request ?? new Request()`
+    // (Core/Resource.js:121), so there is always one to watch — it simply
+    // never fires unless Cesium cancels.
+    expect(read).toHaveBeenCalledWith({ offset: 1000, length: 47 }, expect.any(AbortSignal));
+    expect((read.mock.calls[0] as unknown[])[1]).toMatchObject({ aborted: false });
     expect(releaseCount()).toBe(1);
     // FILE_URL is 'https://host/autzen.copc.laz' and the entry is 47 bytes —
     // a wrong origin here would mis-key the per-host slot registry, and a
@@ -325,5 +327,60 @@ describe('the Range lease is released on every path', () => {
 
     expect(() => resource.fetchArrayBuffer()).toThrow(superError);
     expect(acquireRangeRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancellation', () => {
+  it('aborts the read when Cesium cancels the tile, and still returns the lease', async () => {
+    const { lease, releaseCount } = fakeLease();
+    let seen: AbortSignal | undefined;
+    const read = vi.fn(
+      (_range: unknown, signal?: AbortSignal) =>
+        new Promise<RangeRead>((_resolve, reject) => {
+          seen = signal;
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+    const { budget } = spiedBudget({ verdict: 'admitted', lease });
+    const context = makeContext({ budget, reader: fakeReader({ read }) });
+    const resource = new ScheduledRangeResource({ url: ENTRY_URL }, context);
+
+    const promise = resource.fetchArrayBuffer();
+    expect(seen?.aborted).toBe(false);
+
+    // What `Cesium3DTile.cancelRequests` does, and all it does.
+    (resource as unknown as { request: { cancel: () => void } }).request.cancel();
+
+    await expect(promise).rejects.toThrow();
+    expect(seen?.aborted).toBe(true);
+    // Decision 5: the lease returns on every path, cancellation included.
+    expect(releaseCount()).toBe(1);
+  });
+
+  it('marks the request cancelled, which is how Cesium tells retry from failure', async () => {
+    // `processArrayBuffer` reads `request.cancelled` to decide whether a
+    // rejected fetch restores the tile's previous state or fails it
+    // terminally (`tests/cesium-contract.test.ts` pins that branch). Wrapping
+    // `cancel` for the signal must not cost the flag.
+    const { lease } = fakeLease();
+    const read = vi.fn(
+      (_range: unknown, signal?: AbortSignal) =>
+        new Promise<RangeRead>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+    const { budget } = spiedBudget({ verdict: 'admitted', lease });
+    const resource = new ScheduledRangeResource(
+      { url: ENTRY_URL },
+      makeContext({ budget, reader: fakeReader({ read }) }),
+    );
+
+    const promise = resource.fetchArrayBuffer();
+    const request = (resource as unknown as { request: { cancel: () => void; cancelled: boolean } })
+      .request;
+    request.cancel();
+    await expect(promise).rejects.toThrow();
+
+    expect(request.cancelled).toBe(true);
   });
 });

@@ -14,9 +14,9 @@ export class LeaseAlreadyReleasedError extends CopcTilesetError {
 
   constructor() {
     super(
-      'This lease was already released. Every acquireRangeRequest, acquireDecodeJob, ' +
-        'and acquireHierarchyPage admission must be released exactly once — releasing ' +
-        'it twice is a bug in the caller, not something the budget can recover from.',
+      'This lease was already released. Every acquireRangeRequest and ' +
+        'acquireDecodeJob admission must be released exactly once — releasing it ' +
+        'twice is a bug in the caller, not something the budget can recover from.',
     );
   }
 }

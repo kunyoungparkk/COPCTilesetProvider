@@ -3,6 +3,7 @@ import type { Budget, Lease } from '../budget/index.js';
 import { RangeRequestRejectedError, UnknownTileRequestError } from '../errors/index.js';
 import type { RangeReader } from '../range/index.js';
 import type { TileEntry } from '../tileset/index.js';
+import { signalForRequest } from './cancellation.js';
 
 /**
  * Everything `ScheduledRangeResource` needs to answer a tile request, handed
@@ -160,7 +161,13 @@ export class ScheduledRangeResource extends Resource {
       return Promise.reject(new RangeRequestRejectedError(this.url, admission.reason));
     }
 
-    return ScheduledRangeResource.#readAdmitted(reader, entry, admission.lease);
+    // Cesium assigned `this.request` immediately before calling this
+    // (`Cesium3DTile.js`, `requestSingleContent`), so this is the object its
+    // own `cancelRequests()` cancels. Aborting the read is safe: Cesium's
+    // catch around the request promise checks `request.cancelled` and puts
+    // the tile back to its previous state rather than failing it.
+    const signal = signalForRequest((this as { request?: unknown }).request);
+    return ScheduledRangeResource.#readAdmitted(reader, entry, admission.lease, signal);
   }
 
   /**
@@ -176,9 +183,10 @@ export class ScheduledRangeResource extends Resource {
     reader: RangeReader,
     entry: TileEntry,
     lease: Lease,
+    signal: AbortSignal | undefined,
   ): Promise<ArrayBuffer> {
     try {
-      const { bytes } = await reader.read({ offset: entry.offset, length: entry.length });
+      const { bytes } = await reader.read({ offset: entry.offset, length: entry.length }, signal);
       return bytes;
     } finally {
       lease.release();

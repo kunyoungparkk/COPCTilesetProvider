@@ -134,33 +134,19 @@ rediscovered. Delete an entry when the work lands.
 
 ## For whichever sub-project next touches `src/cesium-runtime/`
 
-- **The hierarchy-page budget is never acquired.** `Budget.acquireHierarchyPage()`
-  has no caller anywhere in `src/` — only its own declaration and
-  implementation, plus tests that call it directly. Measured on a live
-  provider after a real tile fetch, `stats().budget.hierarchy` reads
-  `{"admitted":0,"deferred":0,"rejected":0,"inUse":0,"peak":0}`, and always
-  will. Wiring the call in is not the fix on its own: the registry the codec
-  adds expanded pages to only ever grows — nothing evicts an entry — so a
-  lease acquired per page with nothing ever releasing one would exhaust §7's
-  64 and then defer every further expansion forever, which is worse than not
-  acquiring at all. What is missing first is an eviction policy: which
-  expanded pages may be dropped, what becomes of the tiles Cesium still holds
-  that were built from them, and how a dropped page is rebuilt if traversal
-  comes back. Until that exists, the honest state is an unenforced budget
-  whose stats read zero and say so.
-
-- **No `AbortSignal` reaches anything `src/cesium-runtime/` calls.**
-  `openCopc`, `RangeReader.read` and `WorkerPool.encodeWhenAdmitted` each
-  accept one; the provider, the resource and the codec pass none — the word
-  `signal` does not occur anywhere in `src/cesium-runtime/`. So a tile Cesium
-  cancels when the camera moves on (`Cesium3DTile.cancelRequests`) still runs
-  its Range read to completion, holding its byte-budget and host-slot leases
-  for the whole round trip, and a decode job already posted to a Worker runs
-  to completion too. Nothing leaks — every lease still returns exactly once,
-  as Decision 5 requires — but budget is held against work whose result is
-  discarded, and that budget is what §7's concurrency knobs are tuned from.
-  The wiring is the small half; deciding where the signal comes from is the
-  rest, since Cesium's own cancellation does not hand the codec one.
+- **A decode job cannot be cancelled, and the reason is Cesium's, not ours.**
+  Range reads and `fromUrl` are cancellable now (`cancellation.ts`,
+  `COPCTilesetProviderOptions.signal`), so a tile the camera moved past
+  releases its byte budget and host slot at once. Decode jobs still run to
+  completion, and wiring a signal in would be a regression rather than the
+  finish of the job: `Cesium3DTile.js`'s catch around `makeContent` does not
+  consult `request.cancelled` the way its catch around the request promise
+  does, so an aborted decode sends the tile to `FAILED` — terminal here —
+  instead of back to its previous state. Saving one worker slot at the cost
+  of a permanently dead tile is worse than the waste.
+  `tests/cesium-contract.test.ts` pins both catches, and the day the second
+  one starts checking `cancelled` is the day this becomes available; that
+  test failing is the notification.
 
 ## Unscheduled
 

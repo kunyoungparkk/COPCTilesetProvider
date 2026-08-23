@@ -154,9 +154,6 @@ function fakeBudget(admission: Admission): Budget {
     acquireDecodeJob: () => {
       throw new Error('not exercised by this test');
     },
-    acquireHierarchyPage: () => {
-      throw new Error('not exercised by this test');
-    },
     stats: () => {
       throw new Error('not exercised by this test');
     },
@@ -216,6 +213,7 @@ describe('a point tile', () => {
         entries,
         tilesetContext: tilesetContextFor(transform),
         synthesizedAncestors: { count: 0 },
+        hierarchyPagesExpanded: { count: 0 },
       };
       const codec = createCodec(context);
       const tile = fakeTile();
@@ -246,6 +244,7 @@ describe('a point tile', () => {
         entries,
         tilesetContext: tilesetContextFor(transform),
         synthesizedAncestors: { count: 0 },
+        hierarchyPagesExpanded: { count: 0 },
       };
       const codec = createCodec(context);
       const tile = fakeTile();
@@ -293,6 +292,7 @@ describe('a hierarchy tile', () => {
       // Non-zero on purpose: proves the codec adds to a running total rather
       // than overwriting it with the sub-page's own count.
       synthesizedAncestors: { count: 3 },
+      hierarchyPagesExpanded: { count: 0 },
     };
     const codec = createCodec(context);
     const tile = fakeTile();
@@ -330,6 +330,10 @@ describe('a hierarchy tile', () => {
     // parent `1-0-0-0`, has no entry of its own) added to the pre-existing
     // total, not replacing it.
     expect(context.synthesizedAncestors.count).toBe(4);
+    // One page expanded. Counted separately from the entries it contributed:
+    // a page whose keys were all already known adds no entry at all, so
+    // `registryEntries` could not stand in for this.
+    expect(context.hierarchyPagesExpanded.count).toBe(1);
 
     expect(content).toBeInstanceOf(Tileset3DTileContent);
     expect(tile.hasTilesetContent).toBe(true);
@@ -397,6 +401,7 @@ describe('an unknown entry', () => {
       entries: new Map(),
       tilesetContext: tilesetContextFor(transform),
       synthesizedAncestors: { count: 0 },
+      hierarchyPagesExpanded: { count: 0 },
     };
     const codec = createCodec(context);
 
