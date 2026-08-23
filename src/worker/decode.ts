@@ -1,5 +1,6 @@
 import { Las } from 'copc';
 import type { View } from 'copc';
+import { getLazPerf } from './lazperf.js';
 
 /**
  * The header fields decoding a chunk needs: the record layout for
@@ -56,10 +57,16 @@ export async function decodeChunk(
   header: DecodeHeader,
   pointCount: number,
 ): Promise<View> {
-  const decompressed = await Las.PointData.decompressChunk(compressed, {
-    pointCount,
-    pointDataRecordFormat: header.pointDataRecordFormat,
-    pointDataRecordLength: header.pointDataRecordLength,
-  });
+  const decompressed = await Las.PointData.decompressChunk(
+    compressed,
+    {
+      pointCount,
+      pointDataRecordFormat: header.pointDataRecordFormat,
+      pointDataRecordLength: header.pointDataRecordLength,
+    },
+    // Ours, not copc.js's own: theirs fetches a `.wasm` this bundle does not
+    // ship as a file (`lazperf.ts`).
+    await getLazPerf(),
+  );
   return Las.View.create(decompressed, header);
 }

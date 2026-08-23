@@ -8,16 +8,23 @@ import type {
   ToWorker,
   WorkerPort,
 } from 'copc-tileset-provider';
-import { COPCTilesetProvider, createWorkerHandler } from 'copc-tileset-provider';
+import { COPCTilesetProvider } from 'copc-tileset-provider';
+import { createWorkerHandler } from 'copc-tileset-provider/worker';
 
 /**
  * Every import above names the package rather than a path into `src/`, and
- * that is what this file is for. `spawnWorker` is a required option whose
- * type is `() => WorkerPort`, and the only thing that speaks the protocol a
- * `WorkerPort` has to speak is `createWorkerHandler` — so if either of those
- * is unreachable from the package's single `exports` path, the package as
- * declared cannot be used at all. Node resolves a package's own name to
- * itself, so this import is exactly the one a consumer writes.
+ * that is what this file is for: the two `exports` paths have to between them
+ * reach everything a caller needs, or the package as declared cannot be used.
+ * `spawnWorker` is typed `() => WorkerPort`, and the only thing that speaks
+ * the protocol a `WorkerPort` speaks is `createWorkerHandler` — which lives at
+ * `./worker`, not on the root, because the root re-exports
+ * `COPCTilesetProvider` and so drags Cesium into whatever imports it.
+ *
+ * These names do **not** resolve to `dist/` here. `vitest.config.ts` aliases
+ * them back to `src/`, because `npm test` stays offline and buildless
+ * (CLAUDE.md). So this file pins the shape of the two barrels; what a consumer
+ * actually receives is asserted by `smoke/`, against a real `npm pack`
+ * tarball installed into a real project.
  */
 
 const load = (name: string): Uint8Array =>

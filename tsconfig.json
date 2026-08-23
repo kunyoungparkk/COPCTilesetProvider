@@ -1,8 +1,10 @@
 {
   "compilerOptions": {
     // Browser ESM (OVERVIEW §5). The WebWorker lib is deliberately absent:
-    // it collides with DOM in one program, so src/worker/ gets its own
-    // config when the worker bundle lands.
+    // it collides with DOM in one program. src/worker/ was going to get its
+    // own config for that reason; it did not need one. The only file that
+    // wants Worker globals is worker/browser.ts, and the five-line
+    // `WorkerScope` it declares costs less than a second program.
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
@@ -27,7 +29,17 @@
     // and proj4 references geotiff, none of which we depend on.
     "skipLibCheck": true,
 
-    // No build yet — Rollup arrives with the first source files.
+    // `exports` points at `dist/`, which this repo does not build to run
+    // `tsc` or `vitest` — both stay buildless (CLAUDE.md keeps the suite
+    // offline). These map the package's own name back to the sources the
+    // bundles are built from, so `tests/package-root-api.test.ts` can import
+    // by package name without a `dist/` having to exist first. The mirror of
+    // this list lives in `vitest.config.ts`.
+    "paths": {
+      "copc-tileset-provider": ["./src/index.ts"],
+      "copc-tileset-provider/worker": ["./src/worker/browser.ts"]
+    },
+
     "noEmit": true
   },
   "include": ["src", "tests", "vitest.config.ts"]

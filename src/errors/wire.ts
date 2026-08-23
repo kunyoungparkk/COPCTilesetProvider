@@ -8,7 +8,11 @@ import {
   WktNotInVlrsError,
 } from './copc.js';
 import { CrsCodeNotFoundError, CrsDefinitionUnusableError, CrsNotRegisteredError } from './crs.js';
-import { InvalidSourceUrlError, InvalidTokenBaseError } from './provider.js';
+import {
+  InvalidSourceUrlError,
+  InvalidTokenBaseError,
+  WorkerBundleMissingError,
+} from './provider.js';
 import {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
@@ -69,6 +73,7 @@ const BY_CODE: ReadonlyMap<string, { readonly prototype: CopcTilesetError }> = n
   ['unsupported-header-layout', UnsupportedHeaderLayoutError],
   ['unsupported-point-format', UnsupportedPointFormatError],
   ['wkt-not-in-vlrs', WktNotInVlrsError],
+  ['worker-bundle-missing', WorkerBundleMissingError],
   ['worker-task-failed', WorkerTaskFailedError],
   ['zero-point-chunk', ZeroPointChunkError],
 ]);

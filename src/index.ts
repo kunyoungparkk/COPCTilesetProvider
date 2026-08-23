@@ -12,6 +12,7 @@
  */
 export type { COPCTilesetProviderOptions, ProviderStats } from './cesium-runtime/index.js';
 export { COPCTilesetProvider } from './cesium-runtime/index.js';
+export { browserPort } from './cesium-runtime/index.js';
 export {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,
@@ -36,6 +37,7 @@ export {
   UnsupportedHeaderLayoutError,
   UnsupportedPointFormatError,
   WktNotInVlrsError,
+  WorkerBundleMissingError,
   WorkerTaskFailedError,
   ZeroPointChunkError,
 } from './errors/index.js';
@@ -55,31 +57,26 @@ export type { RangeStats } from './range/index.js';
 export type { BudgetCounterStats, BudgetStats } from './budget/index.js';
 
 /**
- * The Worker realm's half of the library: `spawnWorker` is required and must
- * return a `WorkerPort` speaking this protocol, and `createWorkerHandler` is
- * the only thing that speaks it. Without these exported, the required option
- * could not be satisfied at all from the package as published — `exports` is
- * a single path, so no deep import reaches `src/worker/entry.ts`.
+ * The Worker realm's protocol types, for a caller writing their own Worker.
  *
- * Exported here is not the same as reachable from a Worker, and this entry is
- * a poor front door for one. It also re-exports `COPCTilesetProvider`, which
- * statically imports `cesium`, so a Worker module importing this file gets
- * Cesium in its graph unless the caller's bundler drops it — which the
- * package does nothing to guarantee. Measured once, under Vite 8.2.1 with
- * Cesium 1.143.0: it is not dropped, and the Worker dies on
- * `ReferenceError: global is not defined` before handling a message
- * (`docs/gate-render-findings.md`). Whether another bundler fares better is
- * untested. Until the publish sub-project gives the Worker realm an entry of
- * its own — a `./worker` subpath, a self-contained bundle, or both
- * (`docs/superpowers/plans/carried-forward.md`) — a Worker reaching
- * `createWorkerHandler` is relying on its bundler, not on this package.
+ * `createWorkerHandler` itself is **not** here. It lives at the `./worker`
+ * subpath, which is the entry point the Worker realm gets to itself:
  *
- * `ToWorker` and `FromWorker` come with it because `createWorkerHandler`'s
- * own signature names both: the `post` callback it takes is
- * `(message: FromWorker, transfer: readonly ArrayBuffer[]) => void`, and what
- * it returns takes a `ToWorker`. A caller writing the platform wiring around
- * it — `self.onmessage` in a browser, `parentPort.on('message')` in Node —
- * has to name them.
+ * ```js
+ * // your-worker.js
+ * import 'copc-tileset-provider/worker';   // installs itself; that is all
+ * ```
+ *
+ * Keeping it on this barrel is what broke before. This entry re-exports
+ * `COPCTilesetProvider`, which statically imports `cesium`, and the render
+ * gate measured a Worker importing it dying on `ReferenceError: global is not
+ * defined` before handling a message (`docs/gate-render-findings.md`). It also
+ * dragged the whole Worker realm — laz-perf and its inlined wasm included —
+ * into the library bundle, where nothing on the main thread can use it.
+ *
+ * Most callers need none of this: `fromUrl` builds its own Worker from the
+ * bundle inlined into this library. These types are for the ones who pass
+ * `spawnWorker` instead, and `browserPort` is the adapter they would otherwise
+ * write by hand.
  */
 export type { FromWorker, ToWorker } from './worker/protocol.js';
-export { createWorkerHandler } from './worker/entry.js';

@@ -140,7 +140,17 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
 - 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
   이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
 - Cesium: peer `>=1.142.0 <1.144.0` (번들에 포함하지 않음)
-- 빌드: Rollup(라이브러리+자체완결 Worker 번들), Vite(데모·테스트 앱)
+- 빌드: rolldown(라이브러리+자체완결 Worker 번들), Vite(데모·테스트 앱)
+  - Rollup으로 적었던 자리다. 순정 Rollup은 TypeScript를 스스로 벗지 못해
+    트랜스폼 플러그인이 필요한데, `@rollup/plugin-typescript`는 바로 위 항목이
+    적어둔 그 없는 JS 컴파일러 API를 요구한다. rolldown은 Rollup 호환 설정
+    API를 쓰면서 oxc로 TS를 네이티브로 벗고 CJS도 스스로 처리해
+    `@rollup/plugin-node-resolve`도 `-commonjs`도 필요 없다. Vite 8 자신이
+    rolldown 위에 서 있어 툴체인이 갈라지지도 않는다. 의도는 그대로다 —
+    라이브러리와 자체완결 Worker 번들을 만드는 진짜 번들러.
+  - 선언(`.d.ts`)은 번들러가 아니라 `tsc --emitDeclarationOnly`가 뽑는다.
+    `rollup-plugin-dts` 역시 없는 컴파일러 API를 요구하지만, `tsc` 자신은
+    TS 7에서도 선언을 정상 생성한다(실측).
 - 검증: Vitest(단위) · Playwright(브라우저 E2E) · 로컬 Range 서버(관측) · GitHub Actions CI
 - 출시 절차(publish 직전 1회): `npm pack` → 빈 프로젝트에 tarball 설치 →
   패키지 이름으로 import + `fromUrl` 스모크 1회. 소스 경로에선 절대 안 깨지고

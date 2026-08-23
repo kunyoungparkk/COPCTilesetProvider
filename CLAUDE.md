@@ -68,8 +68,15 @@ Every artifact must be reviewable and continuable by a stranger:
 - `npm run typecheck` — `tsc --noEmit` across `src/`, `tests/`, and the Vitest config.
 - `npm test` — one Vitest run, exactly as CI invokes it.
 - `npm run test:watch` — the same suite in watch mode.
+- `npm run build` — rolldown emits `dist/index.js` and a self-contained
+  `dist/worker.js`, `tsc` emits `dist/types/`, and `build/assert-bundles.mjs`
+  checks both. `npm test` does **not** need it: the suite stays offline and
+  buildless.
+- `npm run smoke` — builds, packs, installs the tarball into a throwaway
+  project, and renders it in headless Chromium (`smoke/README.md`). Installs
+  from the network, so it is a local pre-publish ritual and never CI's.
 
 Deliberately absent from `package.json` until the tooling behind them exists,
-so the manifest never advertises a script that does not run: `npm run build`
-(Rollup library + self-contained Worker bundle), `npm run dev` (Vite demo),
-and `npm run serve:range` (local observable Range server for fixtures).
+so the manifest never advertises a script that does not run: `npm run dev`
+(Vite demo) and `npm run serve:range` (local observable Range server for
+fixtures).

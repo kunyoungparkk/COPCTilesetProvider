@@ -103,46 +103,6 @@ rediscovered. Delete an entry when the work lands.
   entry above: a budget lease held around a `readMany` call has no moment at
   which it could be returned while a sibling group outlives the call.
 
-## For the publish sub-project
-
-- **Give the Worker realm its own entry — the current one does not work.**
-  `src/index.ts` re-exports `createWorkerHandler` so a caller can build the
-  `spawnWorker` a required option asks for, and its doc comment says so. But
-  that same entry statically re-exports `COPCTilesetProvider`, which
-  statically imports `cesium`. The browser render gate measured what that
-  costs: a Worker importing the package root dies on `ReferenceError: global
-  is not defined` inside Cesium before it handles a single message
-  (`docs/gate-render-findings.md`). This is no longer a tree-shaking question
-  to settle — it is a broken documented path. A `./worker` subpath in
-  `exports`, a separate bundle, or both; and `src/index.ts`'s comment stops
-  being true the moment one of them lands.
-
-- **The Worker bundle has to own `laz-perf.wasm`.** laz-perf resolves its
-  `.wasm` relative to wherever its script was served from. The render gate
-  found that under a dev server this lands on a path nothing serves — the SPA
-  fallback answers with `index.html` and the decode dies on `expected magic
-  word 00 61 73 6d, found 3c 21 64 6f`. The gate papered over it with a
-  middleware; a consumer has none. Whatever ships the Worker has to carry or
-  locate this file deliberately (`docs/gate-render-findings.md`).
-
-- **Decide whether the library ships a browser `WorkerPort` adapter.** A
-  browser `Worker` does not satisfy the exported `WorkerPort` type —
-  `onMessage` registers a handler, `Worker.onmessage` is a slot — so every
-  browser caller writes the same ten lines. The render gate wrote them as
-  `browserPort` (`gate/main.ts` on branch `gate/render`). Either ship one or
-  put those ten lines in the README, but a required option a caller cannot
-  satisfy from the package alone is a poor front door.
-
-- **`package.json` needs a `files` field before the first publish.**
-  `src/worker/pipeline.ts` cites `docs/superpowers/plans/carried-forward.md`
-  by path in a doc comment, and the file is tracked in the repo so that
-  pointer resolves today. But `package.json` has no `files` field (checked
-  directly), so `npm pack`/`npm publish` falls back to shipping everything
-  not excluded by `.npmignore`/`.gitignore` — which would ship
-  `docs/superpowers/` (this file included) to consumers. OVERVIEW §5's
-  publish smoke test (`npm pack` into an empty project) is the moment this
-  would first be caught if it is not fixed before then.
-
 ## For whichever sub-project first ships a root README
 
 - **State the ellipsoidal-height (HAE) limitation.** OVERVIEW §6 requires it and
@@ -157,6 +117,20 @@ rediscovered. Delete an entry when the work lands.
   Cesium's style language and picking (`BATCH_ID` per point, required for
   picking — `src/worker/pnts.ts`'s own doc comment) for free. Decision 6
   puts the glTF transition explicitly after v1, not as a v1 concern.
+
+- **State that the default Worker comes from a `blob:` URL.** `fromUrl` builds
+  it from the bundle inlined into the library, so a strict `worker-src` policy
+  that forbids `blob:` blocks it outright. The library cannot fix that; the way
+  out is `spawnWorker` with `browserPort`, or importing
+  `copc-tileset-provider/worker` in a Worker module of the caller's own. Both
+  ship for this reason and neither is discoverable without being written down.
+
+- **State that a bundler ignoring `browser` fields will break.** `copc` is an
+  external dependency, so a consumer's bundler resolves `laz-perf` itself, and
+  what keeps it off the Node build — with its `require("fs")` — is laz-perf's
+  own `"browser": "lib/web/index.js"`. A toolchain that ignores that field
+  fails. The publish smoke builds with Vite, which honours it, so this path is
+  unmeasured (`smoke/README.md`).
 
 ## For whichever sub-project next touches `src/cesium-runtime/`
 

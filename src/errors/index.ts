@@ -12,7 +12,11 @@ export {
   CrsDefinitionUnusableError,
   CrsNotRegisteredError,
 } from './crs.js';
-export { InvalidSourceUrlError, InvalidTokenBaseError } from './provider.js';
+export {
+  InvalidSourceUrlError,
+  InvalidTokenBaseError,
+  WorkerBundleMissingError,
+} from './provider.js';
 export {
   ContentRangeMismatchError,
   ContentRangeUnreadableError,

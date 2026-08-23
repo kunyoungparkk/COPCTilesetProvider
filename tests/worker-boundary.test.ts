@@ -70,3 +70,36 @@ describe('what a Worker can reach through worker/entry.ts', () => {
     expect(reachable).not.toContain('worker/pool.ts');
   });
 });
+
+// browser.ts is what `dist/worker.js` is built from, so it is the file whose
+// closure decides what actually ships into a Worker. The render gate measured
+// what a Worker that reaches Cesium does: it dies on "ReferenceError: global
+// is not defined" before handling a single message
+// (docs/gate-render-findings.md).
+describe('what a Worker can reach through worker/browser.ts', () => {
+  const reachable = importClosure('worker/browser.ts');
+
+  // Without this the exclusions below would pass on an empty result.
+  it('reaches the entry it bootstraps, and through it the pipeline', () => {
+    expect(reachable).toContain('worker/entry.ts');
+    expect(reachable).toContain('worker/pipeline.ts');
+    expect(reachable).toContain('worker/decode.ts');
+  });
+
+  it('cannot reach the registry, the resolver, or the main-thread barrel', () => {
+    expect(reachable).not.toContain('crs/registry.ts');
+    expect(reachable).not.toContain('crs/resolve.ts');
+    expect(reachable).not.toContain('crs/index.ts');
+  });
+
+  it('cannot reach the worker pool', () => {
+    expect(reachable).not.toContain('worker/pool.ts');
+  });
+
+  it('cannot reach the library root or anything Cesium-facing', () => {
+    expect(reachable).not.toContain('index.ts');
+    for (const file of reachable) {
+      expect(file).not.toMatch(/^cesium-runtime\//);
+    }
+  });
+});

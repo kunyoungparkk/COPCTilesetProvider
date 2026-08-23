@@ -1,5 +1,12 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { WASM_SPECIFIER, wasmModuleSource } from '../build/laz-perf-wasm.mjs';
+
+// A `node:worker_threads` Worker loads source directly, with no bundler in
+// front of it, so the virtual module `src/worker/lazperf.ts` imports has to be
+// answered here too. The text comes from the same function the bundler plugin
+// uses, so the Worker under test decodes with the bytes that ship.
+const WASM_URL = `virtual:${WASM_SPECIFIER}`;
 
 /**
  * Resolves this repository's `.js` specifiers to the `.ts` files they mean.
@@ -10,6 +17,9 @@ import { fileURLToPath } from 'node:url';
  * production loads the Rollup bundle OVERVIEW §5 calls for.
  */
 export async function resolve(specifier, context, next) {
+  if (specifier === WASM_SPECIFIER) {
+    return { url: WASM_URL, format: 'module', shortCircuit: true };
+  }
   try {
     return await next(specifier, context);
   } catch (error) {
@@ -22,4 +32,12 @@ export async function resolve(specifier, context, next) {
     }
     throw error;
   }
+}
+
+/** Serves the virtual module `resolve` above admits; everything else passes through. */
+export async function load(url, context, next) {
+  if (url === WASM_URL) {
+    return { format: 'module', source: wasmModuleSource(), shortCircuit: true };
+  }
+  return next(url, context);
 }

@@ -5,15 +5,30 @@
   "license": "MIT",
   "author": "Kunyoung Park",
   "type": "module",
-  "exports": "./src/index.ts",
-  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/types/worker/browser.d.ts",
+      "import": "./dist/worker.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build": "rm -rf dist && rolldown -c rolldown.config.mjs && tsc -p tsconfig.build.json && node build/assert-bundles.mjs dist",
+    "smoke": "npm run build && node smoke/run.mjs"
   },
   "dependencies": {
     "copc": "^0.0.9",
@@ -24,8 +39,11 @@
     "cesium": ">=1.142.0 <1.144.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.20.1",
+    "rolldown": "^1.2.4",
     "typescript": "^7.0.2",
+    "vite": "^8.2.1",
     "vitest": "^4.1.11"
   }
 }

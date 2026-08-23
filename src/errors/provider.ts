@@ -45,3 +45,27 @@ export class InvalidSourceUrlError extends CopcTilesetError {
     this.url = url;
   }
 }
+
+/**
+ * `fromUrl` was called without `spawnWorker` by a build that has no Worker
+ * bundled into it — which means a source checkout, since the published package
+ * always carries one (`rolldown.config.mjs`).
+ */
+export class WorkerBundleMissingError extends CopcTilesetError {
+  readonly code = 'worker-bundle-missing';
+
+  constructor() {
+    super(
+      'This build has no Worker bundled into it, so `fromUrl` cannot make one ' +
+        'for you.\n\n' +
+        'Either run `npm run build` and load the library from `dist/`, or pass ' +
+        'your own:\n\n' +
+        "    import { browserPort } from 'copc-tileset-provider';\n" +
+        "    COPCTilesetProvider.fromUrl(url, {\n" +
+        "      spawnWorker: () => browserPort(new Worker(yourWorkerUrl, { type: 'module' })),\n" +
+        '    });\n\n' +
+        'The published package always carries a Worker, so a consumer never ' +
+        'reaches this.',
+    );
+  }
+}

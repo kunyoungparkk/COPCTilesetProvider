@@ -71,20 +71,25 @@ every Worker, and nothing else would notice.
 
 ## Limits worth knowing
 
-No browser bootstrap **ships** for `entry.ts` yet.
-`tests/worker-entry-node.ts` drives it inside `node:worker_threads` for
-tests, and a shipping browser build needs the Rollup Worker bundle
-OVERVIEW §5 describes, which does not exist.
+`browser.ts` is the browser bootstrap, and `dist/worker.js` is built from it.
+It does two things at once: importing it gives you `createWorkerHandler`, and
+evaluating it inside a Worker installs a handler on `self`. That is what lets
+one artifact serve both the Blob URL `fromUrl` builds by default and the
+`copc-tileset-provider/worker` subpath a caller reaches for when a `worker-src`
+CSP blocks `blob:`.
 
-This module has nevertheless run in a real browser Worker: the render gate
-(`docs/gate-render-findings.md`) loaded `entry.ts` into one and decoded the
-pinned 47-point chunk through it, nine tiles over, with the failure path
-reporting a typed error back across `postMessage`. Two things that run found
-that reading could not. `laz-perf` resolves its `.wasm` against wherever its
-script was served from, so whatever ships this module has to carry or locate
-that file deliberately. And the Worker must not reach `src/index.ts` — the
-package root re-exports `COPCTilesetProvider` and so pulls `cesium` in, which
-does not survive a Worker realm.
+`tests/worker-entry-node.ts` still drives `entry.ts` inside
+`node:worker_threads` for tests, and `tests/worker-boundary.test.ts` now walks
+`browser.ts`'s import closure as well — the Cesium exclusion there is a check,
+not a promise. The render gate measured why it matters: a Worker that reaches
+Cesium dies on `ReferenceError: global is not defined` before handling a single
+message (`docs/gate-render-findings.md`).
+
+Two things that gate found and reading could not. `laz-perf` resolves its
+`.wasm` against wherever its script was served from, which is why
+`lazperf.ts` hands it the bytes directly and no `.wasm` file ships. And the
+Worker must not reach `src/index.ts` — the package root re-exports
+`COPCTilesetProvider` and so pulls `cesium` in.
 
 The batch table's property names and types — `Classification`, `Intensity`,
 `GpsTime`, `ReturnNumber`, `NumberOfReturns` — become a contract once a

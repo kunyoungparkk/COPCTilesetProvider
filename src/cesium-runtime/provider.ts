@@ -17,6 +17,7 @@ import { createCodec } from './codec.js';
 import type { CodecContext } from './codec.js';
 import { ScheduledRangeResource } from './resource.js';
 import type { InterceptContext } from './resource.js';
+import { spawnBundledWorker } from './spawn.js';
 
 /** OVERVIEW §7's default. Cesium's own knob, passed straight through. */
 const DEFAULT_MAXIMUM_SCREEN_SPACE_ERROR = 16;
@@ -49,11 +50,14 @@ export interface COPCTilesetProviderOptions {
   /** OVERVIEW §7, default 4. */
   readonly workerPoolSize?: number;
   /**
-   * How a Worker is made. Required until the bundling sub-project ships a
-   * self-contained Worker bundle (OVERVIEW §5) `fromUrl` could construct on
-   * its own.
+   * How a Worker is made. Optional: without it, `fromUrl` builds one from the
+   * Worker bundle inlined into this library (`spawn.ts`).
+   *
+   * Supply one to escape a `worker-src` CSP that blocks `blob:`, to reuse a
+   * Worker you already own, or to run outside a browser — the test suite
+   * passes a `node:worker_threads` port this way.
    */
-  readonly spawnWorker: () => WorkerPort;
+  readonly spawnWorker?: () => WorkerPort;
   /**
    * The transport `createRangeReader` issues every Range request through.
    * Forwarded unchanged; omitting it gets `globalThis.fetch`.
@@ -236,7 +240,12 @@ export class COPCTilesetProvider {
    * class's own doc); and finally the codec that turns tile bytes into
    * content.
    */
-  static async fromUrl(url: string, options: COPCTilesetProviderOptions): Promise<COPCTilesetProvider> {
+  static async fromUrl(
+    url: string,
+    // Defaulted, not merely optional-per-field: `fromUrl(url)` is the one-line
+    // call OVERVIEW §1 promises, and every field below now has a default.
+    options: COPCTilesetProviderOptions = {},
+  ): Promise<COPCTilesetProvider> {
     // First, before a single request: `ScheduledRangeResource` needs this
     // URL's origin for the per-origin budget and computes it with `new
     // URL(...)`, which throws a bare `TypeError: Invalid URL` on a relative
@@ -332,7 +341,7 @@ export class COPCTilesetProvider {
     // pool built any earlier would be unreachable and undestroyable, since
     // no provider is ever returned to hold it.
     const workerPool = createWorkerPool({
-      spawn: options.spawnWorker,
+      spawn: options.spawnWorker ?? spawnBundledWorker,
       definition,
       budget,
       size: workerPoolSize,
