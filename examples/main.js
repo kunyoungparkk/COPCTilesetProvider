@@ -70,6 +70,11 @@ function say(text, kind = '') {
 // deploy URL among its allowed URLs.
 const ION_IMAGERY_ASSET_ID = 3830182;
 
+// Set here rather than inside either function below, so neither depends on
+// running before the other.
+const ionToken = globalThis.CESIUM_ION_TOKEN;
+if (ionToken) Cesium.Ion.defaultAccessToken = ionToken;
+
 /**
  * Imagery for the globe, best-effort.
  *
@@ -83,9 +88,7 @@ const ION_IMAGERY_ASSET_ID = 3830182;
  * rely on it, and it is rate-limited globally. So the choice is ours or none.
  */
 async function baseImagery() {
-  const token = globalThis.CESIUM_ION_TOKEN;
-  if (token) {
-    Cesium.Ion.defaultAccessToken = token;
+  if (ionToken) {
     try {
       return await Cesium.IonImageryProvider.fromAssetId(ION_IMAGERY_ASSET_ID);
     } catch (error) {
@@ -99,6 +102,26 @@ async function baseImagery() {
   return Cesium.TileMapServiceImageryProvider.fromUrl(
     Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'),
   );
+}
+
+/**
+ * Terrain for the globe, best-effort.
+ *
+ * Without it the globe is the bare WGS84 ellipsoid and the imagery has no
+ * height, so a file whose points sit 124 m up — Autzen's lowest does, by its
+ * own header — hovers over its own ground by that much. Needs the same ion
+ * token the imagery does; without one the demo keeps the ellipsoid.
+ */
+async function baseTerrain() {
+  if (!ionToken) return undefined;
+  try {
+    return await Cesium.createWorldTerrainAsync();
+  } catch (error) {
+    // Same bargain as the imagery: no terrain is a worse picture, not a broken
+    // demo, so the globe survives it — loudly enough to be diagnosed.
+    console.warn('Cesium World Terrain unavailable:', error);
+    return undefined;
+  }
 }
 
 const viewer = new Cesium.Viewer('globe', {
@@ -119,6 +142,9 @@ viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#11161c');
 viewer.scene.globe.depthTestAgainstTerrain = true;
 void baseImagery().then((provider) => {
   viewer.imageryLayers.addImageryProvider(provider);
+});
+void baseTerrain().then((provider) => {
+  if (provider !== undefined) viewer.terrainProvider = provider;
 });
 
 let provider;
