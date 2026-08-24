@@ -14,7 +14,7 @@ Decision 2's codec branch is a fast path inside Cesium: reached, it returns befo
 
 Nothing under `src/` proves that any of this renders a point cloud. The suite here is Vitest against real `Cesium3DTileset`/`Resource`/`Model3DTileContent`/`Tileset3DTileContent` instances and an offline regression guard (`tests/cesium-contract.test.ts`) that reads the installed Cesium source directly — neither drives a browser or produces a pixel. `tests/cesium-boundary.test.ts` is narrower still: it only checks that Cesium stays reachable from `src/index.ts` and unreachable from everywhere else.
 
-`COPCTilesetProviderOptions.spawnWorker` is required, not optional, because nothing in this module can build a `WorkerPort` on its own: that needs the self-contained Worker bundle the bundling sub-project has not shipped yet (OVERVIEW §5). A caller supplies the factory until then.
+`COPCTilesetProviderOptions.spawnWorker` is optional: `spawn.ts` builds a `WorkerPort` from the self-contained Worker bundle inlined into the library, so a caller only supplies a factory to escape a `worker-src blob:` CSP, to reuse a Worker they already own, or to run outside a browser — which is how the suite drives it, over a `node:worker_threads` port.
 
 OVERVIEW §3, Decisions 1, 2, and 6.
 

@@ -1,4 +1,4 @@
-<img width="1280" height="649" alt="Image" src="https://github.com/user-attachments/assets/18d6bd12-5fce-4b57-859e-4be8a65d3478" />
+<img width="1280" height="649" alt="The Autzen stadium point cloud streamed onto Cesium World Terrain by HTTP Range request" src="https://github.com/user-attachments/assets/18d6bd12-5fce-4b57-859e-4be8a65d3478" />
 
 # copc-tileset-provider
 
@@ -29,19 +29,12 @@ viewer.camera.flyTo({ destination: provider.extent });
 npm install copc-tileset-provider cesium
 ```
 
-Published as [`copc-tileset-provider`](https://www.npmjs.com/package/copc-tileset-provider).
-The version is `0.x` on purpose: the library builds, bundles and renders — a
-publish smoke test packs a tarball, installs it into a throwaway project and
-renders it in headless Chromium on every run — but the API has not been lived
-with by anyone outside this repository yet, so it may still move.
+`0.x` on purpose: every release is packed, installed into a throwaway project
+and rendered in headless Chromium, but nobody outside this repository has lived
+with the API yet, so it may still move.
 
-Cesium is a peer dependency, pinned to the versions this library was verified
-against. Both ends of that range are rendered in a real browser before it is
-widened — 1.142.0 and 1.144.0 at the time of writing:
-
-```json
-"peerDependencies": { "cesium": ">=1.142.0 <1.145.0" }
-```
+Cesium is a peer dependency, `>=1.142.0 <1.145.0`. Both ends of that range are
+rendered in a real browser before it is widened.
 
 ## Quick start
 
@@ -74,8 +67,8 @@ viewer.camera.flyTo({ destination: provider.extent });
 `provider.destroy()` releases the tileset, the Worker pool and every outstanding
 reservation.
 
-<!-- Once examples/ exists, add here:
-       A complete, runnable example is in [`examples/`](examples/). -->
+A complete, runnable example is in [`examples/`](examples/) — that is the
+demo above.
 
 ## Coordinate systems
 
@@ -92,23 +85,19 @@ The library reads the EPSG code out of the file's WKT and looks it up. It does
 datum information is missing, and there is no way to tell which in advance. A
 registered definition is the only input somebody has vouched for.
 
-If the file names a system you have not registered, the error tells you which
-one and hands you the call to make:
+An unregistered system fails with an error that names it and hands you the call
+to paste, including where to find the definition:
 
 ```
-This file uses EPSG:2992, which is not registered. Only EPSG:4326 is known by
-default, so every other system has to be supplied once, before the file is
-opened:
+This file uses EPSG:2992, which is not registered. […]
 
     registerCrs(2992, '<proj4 definition>');
 
-The definition for EPSG:2992 is at https://epsg.io/2992 — take its proj4
-string. Its accuracy is yours to vouch for; this library only applies what it
-is given.
+The definition for EPSG:2992 is at https://epsg.io/2992 […]
 ```
 
-Accuracy of a registered definition is the registrant's responsibility. This
-library applies what it is given.
+A registered definition's accuracy is the registrant's; this library applies
+what it is given.
 
 ## Your server has to support Range requests
 
@@ -158,37 +147,31 @@ without it Cesium builds no feature table and there is nothing to read.
 
 Read this section before deciding whether the library fits.
 
-**Heights are ellipsoidal.** Every Z is treated as height above the WGS84
-ellipsoid (HAE). Data stored as orthometric height — above a geoid — will sit at
-a visible vertical offset unless you correct it. Pass the geoid separation at
-your dataset's location, in metres:
+**Heights are ellipsoidal.** Every Z is height above the WGS84 ellipsoid.
+Orthometric data — most surveyed LiDAR — sits at a visible vertical offset
+until you pass the geoid separation at your dataset's location, in metres:
 
 ```js
 await COPCTilesetProvider.fromUrl(url, { geoidHeight: -23.333 });
 ```
 
-That is one constant for the whole file, so it holds over an extent where the
-separation does not vary — a survey site, not a continent. Grid-based
-correction is out of scope for v1, as it is for the implementations this
-library follows. A file that declares a vertical CRS and gets no `geoidHeight`
-loads anyway, with a console warning naming the code it found. The check
-cannot tell whether a declared vertical CRS is itself already ellipsoidal, so
-a file that truly has ellipsoidal heights still warns if it declares one —
-silence that with `geoidHeight: 0` rather than omitting the option.
+One constant for the whole file, so it holds where the separation does not vary
+— a survey site, not a continent. Grid-based correction is out of scope for v1.
+A file that declares a vertical CRS and gets no `geoidHeight` loads anyway, with
+a console warning naming the code. That check cannot tell an already-ellipsoidal
+vertical CRS from a geoid-referenced one, so pass `geoidHeight: 0` to silence
+it rather than omitting the option.
 
-**Content is PNTS, which is 3D Tiles 1.0 legacy.** The format is superseded by
-glTF-based content in 3D Tiles 1.1. It was chosen deliberately: a Worker can
-hand-encode PNTS (a header, a feature table, a binary body) far more simply than
-it can assemble glTF, and a PNTS batch table gives Cesium's style language and
-picking for free — picking requires a `BATCH_ID` per point, which the batch
-table supplies. Moving to glTF is on the roadmap **after** v1, not as a v1
-concern.
+**Content is PNTS, which is 3D Tiles 1.0 legacy**, superseded by glTF-based
+content in 3D Tiles 1.1. Chosen deliberately: a Worker can hand-encode PNTS — a
+header, a feature table, a binary body — far more simply than it can assemble
+glTF, and its batch table is what gives Cesium's style language and picking for
+free. glTF is on the roadmap after v1.
 
-**The default Worker comes from a `blob:` URL.** `fromUrl` builds one from a
-self-contained bundle inlined into the library, so nothing has to be served or
-configured. A strict Content Security Policy that forbids `worker-src blob:`
-blocks it, and the library cannot work around that. Two ways out, both shipped
-for this reason:
+**The default Worker comes from a `blob:` URL**, built from a bundle inlined
+into the library so nothing has to be served or configured. A Content Security
+Policy forbidding `worker-src blob:` blocks it, and the library cannot work
+around that. Supply your own Worker instead:
 
 ```js
 // 1. Your own Worker module — the subpath installs itself when evaluated.
@@ -204,15 +187,14 @@ await COPCTilesetProvider.fromUrl(url, {
 });
 ```
 
-**A bundler that ignores `browser` fields will fail to build.** `copc` is a
-normal dependency, so your bundler resolves `laz-perf` itself. What keeps it off
-laz-perf's Node build — which reaches for `require("fs")` — is laz-perf's own
-`"browser": "lib/web/index.js"`. Vite and webpack honour that field by default,
-and esbuild does when its platform is `browser`. Plain Rollup does not until
-`@rollup/plugin-node-resolve` is given `{ browser: true }`. A toolchain that
-resolves the Node build instead needs an alias to `laz-perf/lib/web/index.js`.
-
-Only the Vite path is actually measured — the publish smoke builds with it.
+**A bundler that ignores `browser` fields will fail to build.** Your bundler
+resolves `laz-perf` itself, and what keeps it off laz-perf's Node build — which
+reaches for `require("fs")` — is that package's own
+`"browser": "lib/web/index.js"`. Vite and webpack honour it by default, esbuild
+when its platform is `browser`, plain Rollup only with
+`@rollup/plugin-node-resolve` set to `{ browser: true }`. Otherwise alias
+`laz-perf` to `laz-perf/lib/web/index.js`. Only the Vite path is measured — the
+publish smoke builds with it.
 
 **Also out of scope for v1:** writing or editing COPC, plain LAS/LAZ files, an
 exact global point budget, WebGL 1, and 2D or Columbus View.
@@ -266,58 +248,14 @@ Every failure is a typed class exported from the package root, each carrying a
 `code` and a message that names the fix. Catch `CopcTilesetError` for all of
 them, or a specific class for one.
 
-## How it works
+## Contributing
 
-```
-fromUrl(url)  ─ reads header + root hierarchy over Range
-              → converts the COPC octree into a synthetic 3D Tiles document
-              → creates a Cesium3DTileset and installs a content codec
-
-per frame     ─ Cesium's traversal picks the tiles it wants
-              → each tile's URI is intercepted, budgeted, and fetched as a Range
-              → a Worker decompresses the LAZ chunk, projects it to ECEF,
-                and encodes PNTS
-              → Cesium owns display, caching, unloading, styling and picking
-```
-
-The engine is not reimplemented. Traversal, level of detail, request priority
-and the GPU cache are Cesium's, and the library's job is to make a COPC file
-look like something Cesium already knows how to draw.
-
-## Development
-
-```sh
-npm test          # Vitest, offline, no build required
-npm run typecheck # tsc --noEmit
-npm run build     # rolldown + tsc → dist/, with the third-party notices
-npm run notices   # regenerate THIRD-PARTY-NOTICES.md after a dependency bump
-npm run smoke     # pack, install into a temp project, render in headless Chromium
-```
-
-`npm run smoke` installs from the network and is a pre-publish check, not part
-of CI — CI stays offline.
-
-### Releasing
-
-1. Bump `version` in `package.json` and add the release's section to
-   [`CHANGELOG.md`](CHANGELOG.md).
-2. Bump the pinned version in `examples/index.html`'s import map. The demo
-   loads the *published* package, so a release that skips this leaves it
-   running the previous version — `tests/manifest.test.ts` fails until both
-   agree.
-3. `npm run notices` if any dependency moved.
-4. `npm run smoke` — the one check that judges the packed tarball rather than
-   the source tree.
-5. Commit, then push a `v<version>` tag. `.github/workflows/release.yml` takes
-   it from there: typecheck, test, build, `npm publish --provenance`, and a
-   GitHub Release.
-
-Design decisions and their reasoning live in [`OVERVIEW.md`](OVERVIEW.md)
-(Korean). Each directory under `src/` carries a README explaining what it owns;
-what the Cesium runtime gate measured is in
-[`src/cesium-runtime/gate-findings.md`](src/cesium-runtime/gate-findings.md).
-Repository conventions are in [`CLAUDE.md`](CLAUDE.md).
+How to run the suite, what review looks for, and how a release is cut:
+[CONTRIBUTING.md](CONTRIBUTING.md). Design decisions and their reasoning are in
+[OVERVIEW.md](OVERVIEW.md) (Korean).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The published bundles inline their dependencies,
+whose licenses are reproduced in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
