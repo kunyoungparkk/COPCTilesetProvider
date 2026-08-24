@@ -1,5 +1,5 @@
 import { CrsCodeNotFoundError, CrsNotRegisteredError } from '../errors/index.js';
-import { findHorizontalEpsgCode } from './horizontal-code.js';
+import { findHorizontalEpsgCode } from './epsg-codes.js';
 import { definitionFor } from './registry.js';
 
 /**

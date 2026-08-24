@@ -9,9 +9,12 @@ const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
 /**
  * Converts geodetic coordinates to Earth-centred, Earth-fixed metres.
  *
- * OVERVIEW §6 treats every height as ellipsoidal: geoid correction is out of
- * scope for v1, so a file storing orthometric heights sits at a vertical
- * offset. §6 requires the README to record that limitation once there is one.
+ * `height` is ellipsoidal (HAE) by the time it reaches here: `createTransformFromDefinition`
+ * (`transform.ts`) is the one place that applies a caller's `geoidHeight`, adding it after
+ * the linear-unit scaling and before `project` calls this function. A file storing
+ * orthometric heights whose caller gave no `geoidHeight` still sits at a vertical
+ * offset — OVERVIEW §6 keeps automatic, grid-based correction out of scope for v1 —
+ * but a known offset is no longer uncorrectable, only uncorrected by default.
  */
 export function geodeticToEcef(
   longitude: number,

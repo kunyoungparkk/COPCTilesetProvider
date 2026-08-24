@@ -572,17 +572,15 @@ describe('geoidHeight', () => {
     const createPool = vi.spyOn(poolModule, 'createWorkerPool');
     const { fetch } = autzenFetch();
 
-    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
+    await COPCTilesetProvider.fromUrl(FILE_URL, {
       spawnWorker,
       fetch,
       geoidHeight: -23.333,
     });
 
-    // The Worker's half.
+    // The Worker's half. The main thread's half is Task 2's subject: the one
+    // function `fromUrl` calls with it is covered there, point by point.
     expect(createPool.mock.calls[0]?.[0]?.geoidHeight).toBe(-23.333);
-    // The main thread's half: the tileset's own root sits lower by that much
-    // than the same file loaded without it.
-    expect(provider.tileset.root.boundingVolume).toBeDefined();
     createPool.mockRestore();
   });
 
@@ -753,6 +751,8 @@ OVERVIEW는 프로젝트 헌법이다. 이 태스크는 **문구를 먼저 제�
 **Files:**
 - Modify: `OVERVIEW.md` §6의 geoid 항목, §3 Decision 6의 CRS 항목
 - Modify: `README.md:162-165`
+- Modify: `src/crs/README.md` — "Height is ellipsoidal — no geoid correction"는 옵션이
+  생긴 뒤로 불완전한 문장이 된다 (Task 2 구현자가 발견, 컨트롤러가 여기로 라우팅)
 - Modify: `examples/main.js`, `examples/README.md` (데모에 `geoidHeight: -23.333` 적용)
 
 - [ ] **Step 1: OVERVIEW §6 문구를 제시하고 승인받는다**

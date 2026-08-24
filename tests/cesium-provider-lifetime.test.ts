@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import type { Resource } from 'cesium';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as budgetModule from '../src/budget/index.js';
 import { COPCTilesetProvider, DELEGATED_PRIMITIVE_METHODS } from '../src/cesium-runtime/provider.js';
 import * as poolModule from '../src/worker/pool.js';
@@ -100,6 +100,20 @@ async function buildProviderCapturingOwnedResources(host: string): Promise<{
   budgetSpy.mockRestore();
   return { provider, pool, budget };
 }
+
+// Every provider built in this file loads the pinned Autzen fixture, whose
+// WKT declares vertical CRS EPSG:6360, without a `geoidHeight` — correct
+// behaviour (tested in tests/cesium-provider.test.ts), but noise here, where
+// nothing in this file is about the warning.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
 
 describe('COPCTilesetProvider as a Cesium primitive', () => {
   it('implements exactly the methods PrimitiveCollection calls on a member it holds', async () => {

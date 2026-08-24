@@ -192,6 +192,30 @@ describe('createWorkerPool', () => {
     expect(port.posted[1]?.kind).toBe('encode');
   });
 
+  // The one hop that actually crosses the realm boundary: `definition` above
+  // is asserted the same way, but only this assertion catches a `geoidHeight`
+  // dropped from the posted `init` — the pool's own field, correctly typed
+  // and correctly threaded everywhere else, simply never reaching `post()`.
+  it('carries the geoid height on the init it posts', () => {
+    const { spawn, ports } = fakeSpawner();
+    const budget = createBudget({ decodeJobs: 4 });
+    const pool = createWorkerPool({
+      spawn,
+      definition: DEFINITION,
+      geoidHeight: -23.333,
+      budget,
+      size: 1,
+    });
+
+    pool.encode(request());
+
+    const port = ports[0];
+    if (port === undefined) throw new Error('expected a port to have been spawned');
+    const init = port.posted[0];
+    if (init === undefined || init.kind !== 'init') throw new Error('expected an init message');
+    expect(init.geoidHeight).toBe(-23.333);
+  });
+
   it('ignores a ready reply whose id does not match that port’s own init', () => {
     const { spawn, ports } = fakeSpawner();
     const budget = createBudget({ decodeJobs: 4 });

@@ -40,6 +40,8 @@ export type EncodeVerdict =
 export interface WorkerPoolOptions {
   readonly spawn: () => WorkerPort;
   readonly definition: string;
+  /** Fixed for the pool's whole lifetime, like `definition`: it rides the one `init` message each slot gets. */
+  readonly geoidHeight?: number;
   readonly budget: Budget;
   readonly size?: number;
 }
@@ -176,7 +178,7 @@ interface Waiter {
  * queue (see its own doc on `WorkerPool`).
  */
 export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
-  const { spawn, definition, budget } = options;
+  const { spawn, definition, geoidHeight, budget } = options;
   const size = options.size ?? DEFAULT_POOL_SIZE;
 
   const slots: Slot[] = [];
@@ -238,7 +240,10 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     port.onMessage((message) => handleMessage(slot, message));
     port.onError((error) => handlePortError(slot, error));
     try {
-      port.post({ kind: 'init', id: initId, definition }, []);
+      port.post(
+        { kind: 'init', id: initId, definition, ...(geoidHeight !== undefined && { geoidHeight }) },
+        [],
+      );
     } catch (thrown) {
       // `init` never reached the Worker: this slot never became usable, the
       // same outcome as a `failed` init reply, just discovered synchronously

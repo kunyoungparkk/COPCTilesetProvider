@@ -18,6 +18,7 @@ export function createWorkerHandler(
   post: (message: FromWorker, transfer: readonly ArrayBuffer[]) => void,
 ): (message: ToWorker) => Promise<void> {
   let definition: string | undefined;
+  let geoidHeight: number | undefined;
 
   return async (message) => {
     if (message.kind === 'init') {
@@ -29,8 +30,9 @@ export function createWorkerHandler(
         // The result is discarded: `encodeNode` builds its own per call, and
         // §7 takes an optimisation from measurement rather than from
         // reasoning. What this call is for is the throw.
-        createTransformFromDefinition(message.definition);
+        createTransformFromDefinition(message.definition, message.geoidHeight);
         definition = message.definition;
+        geoidHeight = message.geoidHeight;
         post({ kind: 'ready', id: message.id }, []);
       } catch (thrown) {
         post({ kind: 'failed', id: message.id, error: toWire(thrown) }, []);
@@ -56,6 +58,7 @@ export function createWorkerHandler(
         header: message.header,
         pointCount: message.pointCount,
         definition,
+        ...(geoidHeight !== undefined && { geoidHeight }),
       });
       post({ kind: 'done', id: message.id, pnts }, [pnts]);
     } catch (thrown) {

@@ -214,7 +214,7 @@ describe('findSpecifiers: a bare / is division or a regex literal, never a stray
     // `'` inside `/'/ ` was read as opening a real string, and scanQuoted
     // then searched the rest of the file for a closing `'` that was never
     // going to mean what it found. This shape is not hypothetical:
-    // `src/crs/horizontal-code.ts` carries a regex literal with the same
+    // `src/crs/epsg-codes.ts` carries a regex literal with the same
     // problem (`/^\s*"?EPSG"?\s*,\s*"?(\d+)"?\s*$/`, four double quotes) —
     // checked directly, that file has no imports of its own and is not
     // currently reachable from either boundary walk, so nothing was actually

@@ -19,6 +19,7 @@ export {
   CopcTilesetError,
   CrsCodeNotFoundError,
   CrsDefinitionUnusableError,
+  CrsGeoidHeightNotFiniteError,
   CrsNotRegisteredError,
   DecodeJobNotAdmittedError,
   InvalidByteRangeError,
@@ -78,5 +79,8 @@ export type { BudgetCounterStats, BudgetStats } from './budget/index.js';
  * bundle inlined into this library. These types are for the ones who pass
  * `spawnWorker` instead, and `browserPort` is the adapter they would otherwise
  * write by hand.
+ *
+ * A hand-written handler must forward the `init` message's `geoidHeight` to
+ * `createTransformFromDefinition` — see `ToWorker`'s own doc comment.
  */
 export type { FromWorker, ToWorker } from './worker/protocol.js';

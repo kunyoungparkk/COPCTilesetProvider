@@ -128,3 +128,50 @@ function formatMessage(
     `definition. ${expand}`
   );
 }
+
+/**
+ * `geoidHeight` reached `createTransformFromDefinition` as something other
+ * than a finite number — `NaN`, or a value that was never a number to begin
+ * with.
+ *
+ * Nothing downstream catches this on its own. proj4's own finite-number guard
+ * (`CrsTransform.toWgs84`'s own doc comment) fires only on the `[x, y]` pair
+ * `forward` receives; `geoidHeight` never reaches `forward` at all — it is
+ * added to `z` after the projection returns. Left unguarded, a `NaN` reaches
+ * `regionForKey`'s bounding volume and `JSON.stringify` silently writes
+ * `null` into the synthetic tileset's `region` array — measured, against the
+ * Autzen fixture `transform.ts`'s own tests are pinned to: `geoidHeight: NaN`
+ * gives `toWgs84` `[-123.0687, 44.0562, NaN]`, and `geoidHeight: '5'` (a value
+ * that was never a number, such as an unparsed API response field) still
+ * poisons `toEcef` to `[NaN, NaN, NaN]`. Neither throws anywhere on its own.
+ */
+export class CrsGeoidHeightNotFiniteError extends CopcTilesetError {
+  readonly code = 'crs-geoid-height-not-finite';
+  readonly geoidHeight: unknown;
+
+  constructor(geoidHeight: unknown) {
+    super(
+      `geoidHeight must be a finite number of metres, but received ` +
+        `${describeReceivedGeoidHeight(geoidHeight)}. Pass the geoid separation N in metres ` +
+        `(for example -23.333), or 0 for a file whose heights are already ellipsoidal.`,
+    );
+    this.geoidHeight = geoidHeight;
+  }
+}
+
+/**
+ * Renders the value this error names, truthfully, for both cases the
+ * validation was written to reject.
+ *
+ * `JSON.stringify` collapses `NaN` and `Infinity` to the text `null` — there
+ * is no JSON representation for either, so a caller whose calculation
+ * produced `NaN` would read a message claiming it passed `null`. `String`
+ * does not have that problem (`String(NaN)` is `"NaN"`), but it has the
+ * opposite one for strings: `String('5')` is `5`, indistinguishable from the
+ * number `5` — erasing exactly the distinction the "not a number at all"
+ * case exists to report. Quoting only strings, and using `String` for
+ * everything else, keeps both distinctions visible.
+ */
+function describeReceivedGeoidHeight(geoidHeight: unknown): string {
+  return typeof geoidHeight === 'string' ? JSON.stringify(geoidHeight) : String(geoidHeight);
+}

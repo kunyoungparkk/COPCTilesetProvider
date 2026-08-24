@@ -1,9 +1,10 @@
 import { Cesium3DTileset, Rectangle } from 'cesium';
+import type { Las } from 'copc';
 import type { Budget, BudgetStats } from '../budget/index.js';
 import { createBudget } from '../budget/index.js';
 import type { CopcFile } from '../copc/index.js';
 import { openCopc } from '../copc/index.js';
-import { registerCrs, resolveCrsDefinition } from '../crs/index.js';
+import { findVerticalEpsgCode, registerCrs, resolveCrsDefinition } from '../crs/index.js';
 import type { CrsTransform } from '../crs/index.js';
 import { createTransformFromDefinition } from '../crs/worker.js';
 import { InvalidSourceUrlError, InvalidTokenBaseError } from '../errors/index.js';
@@ -83,6 +84,18 @@ export interface COPCTilesetProviderOptions {
    * outlive the load it was meant to bound and cancel every later tile.
    */
   readonly signal?: AbortSignal;
+  /**
+   * The geoid's separation from the WGS84 ellipsoid at this file's location,
+   * in metres, added to every height — `h = H + N`, so this is N as geodesy
+   * publishes it (negative across North America). Omit it for a file whose Z
+   * is already ellipsoidal.
+   *
+   * One constant, so it is right only over an extent small enough that the
+   * separation does not vary across it — a survey site, not a continent. Its
+   * accuracy is the caller's to vouch for, the way a registered CRS
+   * definition's is (Decision 6).
+   */
+  readonly geoidHeight?: number;
 }
 
 export interface ProviderStats {
@@ -202,6 +215,56 @@ function measureExtent(
 }
 
 /**
+ * Says so, once, when a file measures height from a geoid and the caller gave
+ * nothing to correct it with.
+ *
+ * A warning rather than a typed error, which is where this parts company with
+ * Decision 6's treatment of an unregistered horizontal CRS. The asymmetry is
+ * deliberate: an unresolvable horizontal system leaves the points nowhere at
+ * all, while an uncorrected height leaves them somewhere wrong by a knowable
+ * amount — and refusing the file would strand a caller who does not know N.
+ *
+ * The message follows the same rule the errors do: it names what was found and
+ * the call to paste. The centre comes from the header so the caller has the
+ * coordinates to look N up with, and no particular service is named — which
+ * one is right depends on the country the data is in.
+ */
+function warnIfHeightsAreUncorrected(
+  wkt: string | undefined,
+  geoidHeight: number | undefined,
+  // The same slice `measureRootGeometricError` takes, for the same reason:
+  // the extent is all this needs, and naming it says so.
+  header: Pick<Las.Header, 'min' | 'max'>,
+  transform: CrsTransform,
+): void {
+  // `wkt === undefined` is not a defensive check against an impossible case
+  // (this codebase forbids those) — it is type narrowing, because
+  // `findVerticalEpsgCode` takes `string` and `file.wkt` is `string | undefined`.
+  if (geoidHeight !== undefined || wkt === undefined) {
+    return;
+  }
+  const code = findVerticalEpsgCode(wkt);
+  if (code === null) {
+    return;
+  }
+
+  const [minX, minY] = header.min;
+  const [maxX, maxY] = header.max;
+  const centreX = (minX + maxX) / 2;
+  const centreY = (minY + maxY) / 2;
+  const [longitude, latitude] = transform.toWgs84(centreX, centreY, 0);
+
+  console.warn(
+    `copc-tileset-provider: this file declares vertical CRS EPSG:${code}, which measures ` +
+      `height from a geoid, but no geoidHeight was given. Its points will be off by the geoid ` +
+      `separation at this location (worldwide, roughly -107 m to +85 m). Look up the geoid ` +
+      `height N at this dataset's centre (${latitude.toFixed(4)}, ${longitude.toFixed(4)}) and ` +
+      `pass it in metres:\n\n  COPCTilesetProvider.fromUrl(url, { geoidHeight: N })\n\n` +
+      `A file whose heights are already ellipsoidal silences this with geoidHeight: 0.`,
+  );
+}
+
+/**
  * Assembles everything `src/copc/`, `src/crs/`, `src/tileset/`,
  * `src/worker/` and `src/budget/` build into the one primitive
  * `scene.primitives.add(...)` takes (OVERVIEW §1).
@@ -305,7 +368,9 @@ export class COPCTilesetProvider {
     const file = await openCopc(reader, options.signal);
 
     const definition = resolveCrsDefinition(file.wkt);
-    const transform = createTransformFromDefinition(definition);
+    const transform = createTransformFromDefinition(definition, options.geoidHeight);
+
+    warnIfHeightsAreUncorrected(file.wkt, options.geoidHeight, file.header, transform);
 
     const rootGeometricError = measureRootGeometricError(file.header, transform);
 
@@ -378,6 +443,9 @@ export class COPCTilesetProvider {
     const workerPool = createWorkerPool({
       spawn: options.spawnWorker ?? spawnBundledWorker,
       definition,
+      // Conditional spread for the same `exactOptionalPropertyTypes` reason as
+      // the `fetch` one above.
+      ...(options.geoidHeight !== undefined && { geoidHeight: options.geoidHeight }),
       budget,
       size: workerPoolSize,
     });

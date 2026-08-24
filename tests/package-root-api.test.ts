@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   BudgetCounterStats,
   COPCTilesetProviderOptions,
@@ -103,6 +103,20 @@ function spawnWorker(): WorkerPort {
     },
   };
 }
+
+// The pinned Autzen fixture's WKT declares vertical CRS EPSG:6360, and
+// `fromUrl` here is never given a `geoidHeight` — correct behaviour (tested
+// in tests/cesium-provider.test.ts), but noise in a file about the package's
+// public surface, not the warning.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
 
 describe('the package as declared', () => {
   it('lets a caller build a WorkerPort that speaks the protocol, from the package root alone', async () => {

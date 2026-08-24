@@ -1,5 +1,5 @@
 import proj4 from 'proj4';
-import { CrsDefinitionUnusableError } from '../errors/index.js';
+import { CrsDefinitionUnusableError, CrsGeoidHeightNotFiniteError } from '../errors/index.js';
 import { geodeticToEcef } from './ecef.js';
 
 // Restated rather than read out of the registry: 4326 is registered as a
@@ -13,8 +13,9 @@ export interface CrsTransform {
    *
    * For finite input the height depends only on `z`: proj4 converts the
    * horizontal pair and this module scales the height by the definition's
-   * linear unit, so the `x` and `y` passed alongside do not affect it. A
-   * non-finite one is the exception, and no height comes back at all —
+   * linear unit and adds `geoidHeight`, so the `x` and `y` passed alongside
+   * do not affect it. A non-finite one is the exception, and no height comes
+   * back at all —
    * measured, proj4 2.21 `forward([NaN, 848882.15])` throws
    * `TypeError: coordinates must be finite numbers`. The path that can reach
    * it is not point data but `regionForKey`, which feeds `info.cube`'s
@@ -23,9 +24,9 @@ export interface CrsTransform {
   toWgs84(x: number, y: number, z: number): [number, number, number];
   /**
    * File coordinates to ECEF metres. `z` is taken to be in the same linear unit
-   * as `x` and `y`, which is a v1 limitation of its own alongside OVERVIEW §6's
-   * ellipsoidal heights: a file measuring height in a unit its horizontal
-   * system does not use comes out vertically scaled.
+   * as `x` and `y`: a file measuring height in a unit its horizontal system does
+   * not use comes out vertically scaled. That is a v1 limitation of its own, and
+   * distinct from the datum offset `geoidHeight` corrects.
    */
   toEcef(x: number, y: number, z: number): [number, number, number];
 }
@@ -59,6 +60,17 @@ function metresPerUnit(definition: string): number {
 }
 
 /**
+ * Refuses a `geoidHeight` that is not a finite number, before `project`
+ * (below) ever adds it to `z`. See `CrsGeoidHeightNotFiniteError`'s own doc
+ * comment for why nothing downstream catches this on its own.
+ */
+function rejectUnusableGeoidHeight(geoidHeight: number): void {
+  if (!Number.isFinite(geoidHeight)) {
+    throw new CrsGeoidHeightNotFiniteError(geoidHeight);
+  }
+}
+
+/**
  * Builds a file's transform: `toWgs84` for degrees and metres, `toEcef` for
  * ECEF metres, both off the one projection built here.
  *
@@ -76,14 +88,30 @@ function metresPerUnit(definition: string): number {
  * its compound WKT to proj4 throws, and feeding its PROJCS subtree alone
  * projects correctly — so what is at stake here is unpredictability.)
  *
- * OVERVIEW §6 keeps heights ellipsoidal — a datum offset, not a unit — so z is
- * scaled into metres and otherwise passes through the projection untouched.
+ * OVERVIEW §6 keeps heights ellipsoidal by default — a datum offset, not a
+ * unit — so z is scaled into metres and, absent a `geoidHeight` correction,
+ * otherwise passes through the projection untouched.
  *
  * Refuses definitions it cannot carry across the Worker boundary before any
- * of that runs — see `rejectUnusableDefinition` below for why.
+ * of that runs — see `rejectUnusableDefinition` below for why. Refuses a
+ * non-finite `geoidHeight` the same way, before any of that runs either —
+ * see `rejectUnusableGeoidHeight` below.
+ *
+ * `geoidHeight` is the geoid's separation from the ellipsoid at this file's
+ * location, in metres — `h = H + N`, so it is added, and the caller's number is
+ * N as geodesy publishes it. It lands after the linear unit because it is a
+ * datum offset and not a unit: a file in feet still takes its correction in
+ * metres. Zero, the default, is the ellipsoidal-height assumption every caller
+ * had before the option existed. Its accuracy is the caller's to vouch for,
+ * the way a registered definition's is (Decision 6), and one constant is only
+ * right over an extent small enough that N does not vary across it.
  */
-export function createTransformFromDefinition(definition: string): CrsTransform {
+export function createTransformFromDefinition(
+  definition: string,
+  geoidHeight = 0,
+): CrsTransform {
   rejectUnusableDefinition(definition);
+  rejectUnusableGeoidHeight(geoidHeight);
 
   const toWgs84Projection = proj4(definition, WGS84);
   const metresPerZ = metresPerUnit(definition);
@@ -93,7 +121,7 @@ export function createTransformFromDefinition(definition: string): CrsTransform 
   // rule and its points by another.
   const project = (x: number, y: number, z: number): [number, number, number] => {
     const [longitude, latitude] = toWgs84Projection.forward([x, y]);
-    return [longitude, latitude, z * metresPerZ];
+    return [longitude, latitude, z * metresPerZ + geoidHeight];
   };
 
   return {

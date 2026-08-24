@@ -10,7 +10,7 @@
  * makes "the builder drags no registry with it" checkable; import it there.
  */
 export { geodeticToEcef } from './ecef.js';
-export { findHorizontalEpsgCode } from './horizontal-code.js';
+export { findHorizontalEpsgCode, findVerticalEpsgCode } from './epsg-codes.js';
 export { registerCrs } from './registry.js';
 export { resolveCrsDefinition } from './resolve.js';
 export type { CrsTransform } from './transform.js';

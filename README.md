@@ -161,8 +161,21 @@ Read this section before deciding whether the library fits.
 
 **Heights are ellipsoidal.** Every Z is treated as height above the WGS84
 ellipsoid (HAE). Data stored as orthometric height — above a geoid — will sit at
-a visible vertical offset. Geoid correction is out of scope for v1, as it is for
-comparable implementations.
+a visible vertical offset unless you correct it. Pass the geoid separation at
+your dataset's location, in metres:
+
+```js
+await COPCTilesetProvider.fromUrl(url, { geoidHeight: -23.333 });
+```
+
+That is one constant for the whole file, so it holds over an extent where the
+separation does not vary — a survey site, not a continent. Grid-based
+correction is out of scope for v1, as it is for the implementations this
+library follows. A file that declares a vertical CRS and gets no `geoidHeight`
+loads anyway, with a console warning naming the code it found. The check
+cannot tell whether a declared vertical CRS is itself already ellipsoidal, so
+a file that truly has ellipsoidal heights still warns if it declares one —
+silence that with `geoidHeight: 0` rather than omitting the option.
 
 **Content is PNTS, which is 3D Tiles 1.0 legacy.** The format is superseded by
 glTF-based content in 3D Tiles 1.1. It was chosen deliberately: a Worker can
@@ -223,6 +236,7 @@ page — three Range requests — before resolving.
 | `spawnWorker` | bundled Worker | Supply your own Worker, as a `WorkerPort`. See [Limits](#limits). |
 | `fetch` | `globalThis.fetch` | Every Range request goes through this. Use it to add auth headers, sign URLs, or route through a proxy. |
 | `signal` | — | Aborts the three reads `fromUrl` makes. Tile requests are cancelled by Cesium itself. |
+| `geoidHeight` | — (HAE) | The geoid's separation from the WGS84 ellipsoid at this file's location, in metres, added to every height. Omit it for a file whose Z is already ellipsoidal. See [Limits](#limits). |
 
 ### Provider
 

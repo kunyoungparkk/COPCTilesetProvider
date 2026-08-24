@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Cartesian3, Rectangle } from 'cesium';
 import type { Resource } from 'cesium';
 import { COPCTilesetProvider } from '../src/cesium-runtime/provider.js';
@@ -68,6 +68,20 @@ function autzenFetch(): typeof globalThis.fetch {
     );
   }) as unknown as typeof globalThis.fetch;
 }
+
+// The pinned Autzen fixture's WKT declares vertical CRS EPSG:6360, and
+// `fromUrl` here is never given a `geoidHeight` — correct behaviour (tested
+// in tests/cesium-provider.test.ts), but noise in a file about the point-tile
+// pipeline, not the warning.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
 
 describe('a point tile through the composition fromUrl builds', () => {
   it('spawns a real Worker, decodes the pinned chunk, and returns Cesium point content', async () => {

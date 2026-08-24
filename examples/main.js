@@ -10,6 +10,10 @@ const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
+// Geoid height at Autzen (44.0587, -123.0687), from NOAA's NGS geoid service.
+// The value belongs to this dataset's location, not to the library.
+const AUTZEN_GEOID_HEIGHT = -23.333;
+
 // ---------------------------------------------------------------------------
 // Using the library. This is the whole of it.
 // ---------------------------------------------------------------------------
@@ -21,7 +25,11 @@ const OREGON =
 async function showCopc(viewer, url) {
   COPCTilesetProvider.registerCrs(2992, OREGON);
 
-  const provider = await COPCTilesetProvider.fromUrl(url);
+  const provider = await COPCTilesetProvider.fromUrl(url, {
+    // Autzen's Z is NAVD88 orthometric; NGS puts the geoid 23.333 m below the
+    // ellipsoid here. Without this the points float that far over the terrain.
+    geoidHeight: AUTZEN_GEOID_HEIGHT,
+  });
   viewer.scene.primitives.add(provider);
   await viewer.flyTo(provider.tileset, {
     offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-32), 0),
@@ -108,9 +116,10 @@ async function baseImagery() {
  * Terrain for the globe, best-effort.
  *
  * Without it the globe is the bare WGS84 ellipsoid and the imagery has no
- * height, so a file whose points sit 124 m up — Autzen's lowest does, by its
- * own header — hovers over its own ground by that much. Needs the same ion
- * token the imagery does; without one the demo keeps the ellipsoid.
+ * height, so a file whose points sit 100 m up — Autzen's lowest does, once
+ * the geoid correction above lands it near true HAE — hovers over its own
+ * ground by that much. Needs the same ion token the imagery does; without
+ * one the demo keeps the ellipsoid.
  */
 async function baseTerrain() {
   if (!ionToken) return undefined;

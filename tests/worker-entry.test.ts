@@ -269,6 +269,51 @@ describe('createWorkerHandler', () => {
   });
 });
 
+describe('createWorkerHandler carries the geoid height', () => {
+  /** Runs one init/encode pair and returns the pnts bytes it replied with. */
+  const encodeWith = async (geoidHeight?: number): Promise<Uint8Array> => {
+    const { header, pointCount, definition } = await loadNode();
+    const { sent, post } = collector();
+    const handler = createWorkerHandler(post);
+
+    await handler({
+      kind: 'init',
+      id: 1,
+      definition,
+      ...(geoidHeight !== undefined && { geoidHeight }),
+    });
+    await handler({
+      kind: 'encode',
+      id: 2,
+      compressed: fixture('autzen-node-5-16-3-1.bin').buffer as ArrayBuffer,
+      header,
+      pointCount,
+    });
+
+    const reply = sent[1];
+    if (reply?.kind !== 'done') {
+      throw new Error(`expected a done reply, got ${JSON.stringify(reply)}`);
+    }
+    return new Uint8Array(reply.pnts);
+  };
+
+  // The height rides one init message and has to outlive it: every encode
+  // afterwards builds its own transform, and a handler that stored the
+  // definition but dropped the height would still answer done — with points
+  // in the wrong place.
+  it('applies an init geoid height to a later encode', async () => {
+    const plain = await encodeWith();
+    const lowered = await encodeWith(-23.333);
+
+    expect(lowered.byteLength).toBe(plain.byteLength);
+    expect(lowered).not.toEqual(plain);
+  });
+
+  it('encodes identically when no height is given', async () => {
+    expect(await encodeWith()).toEqual(await encodeWith(0));
+  });
+});
+
 describe('against a real node:worker_threads Worker', () => {
   // WASM initialisation in a fresh Worker is not instant: measured directly
   // (`node --import tests/worker-hook.mjs`, this machine, 3 runs) at

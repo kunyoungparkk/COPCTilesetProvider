@@ -7,7 +7,12 @@ import {
   UnsupportedPointFormatError,
   WktNotInVlrsError,
 } from './copc.js';
-import { CrsCodeNotFoundError, CrsDefinitionUnusableError, CrsNotRegisteredError } from './crs.js';
+import {
+  CrsCodeNotFoundError,
+  CrsDefinitionUnusableError,
+  CrsGeoidHeightNotFiniteError,
+  CrsNotRegisteredError,
+} from './crs.js';
 import {
   InvalidSourceUrlError,
   InvalidTokenBaseError,
@@ -55,6 +60,7 @@ const BY_CODE: ReadonlyMap<string, { readonly prototype: CopcTilesetError }> = n
   ['content-range-unreadable', ContentRangeUnreadableError],
   ['crs-code-not-found', CrsCodeNotFoundError],
   ['crs-definition-unusable', CrsDefinitionUnusableError],
+  ['crs-geoid-height-not-finite', CrsGeoidHeightNotFiniteError],
   ['crs-not-registered', CrsNotRegisteredError],
   ['decode-job-not-admitted', DecodeJobNotAdmittedError],
   ['invalid-byte-range', InvalidByteRangeError],

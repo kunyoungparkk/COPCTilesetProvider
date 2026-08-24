@@ -64,6 +64,14 @@ async function importEngineModule<T>(path: string): Promise<T> {
   return (await import(resolved)) as T;
 }
 
+/** The RTC_CENTER a PNTS buffer declares, read out of its feature table JSON. */
+function rtcCenterOf(pnts: ArrayBuffer): [number, number, number] {
+  const view = new DataView(pnts);
+  const jsonLength = view.getUint32(12, true);
+  const json = new TextDecoder().decode(new Uint8Array(pnts, 28, jsonLength));
+  return JSON.parse(json).RTC_CENTER;
+}
+
 describe('encodeNode', () => {
   let header: DecodeHeader;
   let compressed: Uint8Array;
@@ -108,5 +116,22 @@ describe('encodeNode', () => {
     await expect(
       encodeNode({ compressed: new Uint8Array(0), header, pointCount: 0, definition }),
     ).rejects.toBeInstanceOf(ZeroPointChunkError);
+  });
+
+  it('carries the geoid height into the positions it encodes', async () => {
+    const plain = await encodeNode({ compressed, header, pointCount, definition });
+    const lowered = await encodeNode({
+      compressed,
+      header,
+      pointCount,
+      definition,
+      geoidHeight: -23.333,
+    });
+
+    // PNTS RTC_CENTER is the midpoint of the transformed points' ECEF box, so a
+    // vertical datum shift moves it and nothing else about the tile changes.
+    expect(rtcCenterOf(lowered)).not.toEqual(rtcCenterOf(plain));
+    expect(Math.hypot(...rtcCenterOf(lowered))).toBeLessThan(Math.hypot(...rtcCenterOf(plain)));
+    expect(lowered.byteLength).toBe(plain.byteLength);
   });
 });

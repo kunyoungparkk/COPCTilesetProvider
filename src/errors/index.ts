@@ -10,6 +10,7 @@ export {
 export {
   CrsCodeNotFoundError,
   CrsDefinitionUnusableError,
+  CrsGeoidHeightNotFiniteError,
   CrsNotRegisteredError,
 } from './crs.js';
 export {

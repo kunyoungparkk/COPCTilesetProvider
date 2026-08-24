@@ -41,6 +41,15 @@ That limitation is worth knowing rather than hiding: paste a URL from a host
 with the same gap and the demo prints the library's own error, naming the
 header the server has to add.
 
+## Vertical datum
+
+Autzen's Z is NAVD88 orthometric height, not ellipsoidal, so `main.js` passes
+`geoidHeight: -23.333` to `fromUrl` — the geoid's separation from the WGS84
+ellipsoid at Autzen's coordinates (44.0587, -123.0687), read from NOAA's NGS
+geoid service. That number belongs to this one location: geoid separation
+varies across the globe, so a different dataset needs its own value, looked
+up for its own footprint, not this one copied over.
+
 ## Imagery
 
 The globe's basemap comes from Cesium ion when the `CESIUM_ION_TOKEN`
@@ -59,9 +68,10 @@ but prints a banner across the page asking you not to rely on it.
 
 ## What the demo shows
 
-- **`fromUrl(url)` with nothing else.** No worker to construct, no wasm to
-  serve, no adapter to write — the Worker is built from a bundle inlined into
-  the library.
+- **`fromUrl(url, { geoidHeight })`, and nothing else.** No worker to
+  construct, no wasm to serve, no adapter to write — the Worker is built from
+  a bundle inlined into the library. `geoidHeight` is Autzen's own vertical
+  offset (see [Vertical datum](#vertical-datum)), not required setup.
 - **Errors are API.** The status bar prints the typed error's message
   verbatim. An unregistered coordinate system prints the `registerCrs(...)`
   call to paste.
@@ -69,8 +79,8 @@ but prints a banner across the page asking you not to rely on it.
   in this library participates.
 
 The part that uses the library is a single block at the top of `main.js`,
-above the line that separates it from the page wiring. It is about ten lines,
-and that is the claim.
+above the line that separates it from the page wiring. It is about fifteen
+lines, and that is the claim.
 
 ## Relationship to `smoke/`
 

@@ -3,7 +3,7 @@ import { autzenWkt } from './autzen-wkt.js';
 import { geodeticToEcef, registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
 // The Worker's entry point, imported here the way the Worker will import it.
 import { createTransformFromDefinition } from '../src/crs/worker.js';
-import { CrsDefinitionUnusableError } from '../src/errors/index.js';
+import { CrsDefinitionUnusableError, CrsGeoidHeightNotFiniteError } from '../src/errors/index.js';
 
 const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
@@ -401,5 +401,90 @@ describe('createTransformFromDefinition refuses what it cannot carry across a re
 
     expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
     expect((caught as CrsDefinitionUnusableError).reason).toBe('missing-projection');
+  });
+});
+
+describe('geoid height', () => {
+  // Autzen's own Z is NAVD88 orthometric, and NGS puts the geoid 23.333 m
+  // below the ellipsoid there. Given that number the transform has to lower
+  // the point by exactly it — no more, and along the local vertical rather
+  // than along any axis.
+  const AUTZEN_GEOID_HEIGHT = -23.333;
+  // The file header's own offset point, which is inside the data.
+  const POINT = { x: 637290.75, y: 851209.9, z: 406.14 };
+
+  it('moves a point by the geoid height it is given', async () => {
+    registerCrs(2992, OREGON);
+    const definition = resolveCrsDefinition(await autzenWkt());
+
+    const plain = createTransformFromDefinition(definition);
+    const corrected = createTransformFromDefinition(definition, AUTZEN_GEOID_HEIGHT);
+
+    const a = plain.toEcef(POINT.x, POINT.y, POINT.z);
+    const b = corrected.toEcef(POINT.x, POINT.y, POINT.z);
+
+    expect(metresApart(a, b)).toBeCloseTo(Math.abs(AUTZEN_GEOID_HEIGHT), 6);
+    // Direction, not just magnitude: a negative geoid height brings the point
+    // closer to the centre of the earth.
+    expect(Math.hypot(...b)).toBeLessThan(Math.hypot(...a));
+  });
+
+  it('adds the geoid height after the linear unit, not before it', async () => {
+    registerCrs(2992, OREGON);
+    const definition = resolveCrsDefinition(await autzenWkt());
+
+    const [, , plainHeight] = createTransformFromDefinition(definition).toWgs84(
+      POINT.x, POINT.y, POINT.z,
+    );
+    const [, , correctedHeight] = createTransformFromDefinition(
+      definition,
+      AUTZEN_GEOID_HEIGHT,
+    ).toWgs84(POINT.x, POINT.y, POINT.z);
+
+    // The file is in feet. Were the offset added before the scale it would
+    // arrive multiplied by 0.3048 — 7.1 m instead of 23.333 m.
+    expect(plainHeight).toBeCloseTo(POINT.z * FOOT, 9);
+    expect(correctedHeight).toBeCloseTo(POINT.z * FOOT + AUTZEN_GEOID_HEIGHT, 9);
+  });
+
+  // Every existing caller passes one argument. This is the guard that says so.
+  it('changes nothing when it is not given', async () => {
+    registerCrs(2992, OREGON);
+    const definition = resolveCrsDefinition(await autzenWkt());
+
+    expect(createTransformFromDefinition(definition).toEcef(POINT.x, POINT.y, POINT.z)).toEqual(
+      createTransformFromDefinition(definition, 0).toEcef(POINT.x, POINT.y, POINT.z),
+    );
+  });
+
+  // Unlike a bad definition, nothing downstream throws on its own: proj4's
+  // finite-number guard only ever sees the [x, y] pair, never this offset.
+  // Left unchecked a NaN reaches regionForKey and JSON.stringify silently
+  // writes null into the synthetic tileset's region array instead.
+  it('rejects a NaN geoidHeight', () => {
+    expect(() => createTransformFromDefinition(OREGON, Number.NaN)).toThrow(
+      CrsGeoidHeightNotFiniteError,
+    );
+    // JSON.stringify(NaN) is the text "null" — pinned so the message can't
+    // regress into telling a caller who passed NaN that it received null.
+    expect(() => createTransformFromDefinition(OREGON, Number.NaN)).toThrow(/received NaN\./);
+  });
+
+  // The ship-as-JS-library case: a value that was never a number at all, such
+  // as an unparsed field off an API response.
+  it('rejects a geoidHeight that is not a number at all', () => {
+    expect(() => createTransformFromDefinition(OREGON, '5' as unknown as number)).toThrow(
+      CrsGeoidHeightNotFiniteError,
+    );
+    // Quoted, so a string '5' reads differently in the message than the
+    // number 5 would — losing the quotes would hide that a string arrived.
+    expect(() => createTransformFromDefinition(OREGON, '5' as unknown as number)).toThrow(
+      /received "5"\./,
+    );
+  });
+
+  it('accepts 0 and a normal negative value', () => {
+    expect(() => createTransformFromDefinition(OREGON, 0)).not.toThrow();
+    expect(() => createTransformFromDefinition(OREGON, AUTZEN_GEOID_HEIGHT)).not.toThrow();
   });
 });

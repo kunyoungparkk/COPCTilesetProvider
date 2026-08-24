@@ -9,13 +9,15 @@ import { toRelativePositions } from './positions.js';
  * One COPC chunk's compressed bytes and the hierarchy's own account of how
  * many points it holds, plus the proj4 definition to transform them with —
  * already resolved, never a code or a WKT string (see this module's own doc
- * comment below).
+ * comment below) — and the geoid height to correct them with, forwarded
+ * unchanged from `init.geoidHeight` (`protocol.ts`).
  */
 export interface EncodeNodeInput {
   compressed: Uint8Array;
   header: DecodeHeader;
   pointCount: number;
   definition: string;
+  geoidHeight?: number;
 }
 
 /**
@@ -62,7 +64,7 @@ export async function encodeNode(input: EncodeNodeInput): Promise<ArrayBuffer> {
     throw new ZeroPointChunkError();
   }
 
-  const transform = createTransformFromDefinition(input.definition);
+  const transform = createTransformFromDefinition(input.definition, input.geoidHeight);
   const placed = toRelativePositions(view, transform);
   return encodePnts(view, placed);
 }

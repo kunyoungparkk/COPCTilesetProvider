@@ -12,7 +12,21 @@ import type { DecodeHeader } from './index.js';
  * message that cannot do its job.
  */
 export type ToWorker =
-  | { readonly kind: 'init'; readonly id: number; readonly definition: string }
+  | {
+      readonly kind: 'init';
+      readonly id: number;
+      readonly definition: string;
+      /**
+       * OVERVIEW §6's geoid offset, in metres. Optional on the wire so the
+       * default has one owner — `createTransformFromDefinition` — rather than
+       * one per hop. A hand-written handler (see `ToWorker`'s export doc in
+       * `src/index.ts`) must forward this to that function itself — it is not
+       * applied anywhere else, so dropping it silently mislocates every point
+       * relative to the bounding volumes and geometric error the main thread
+       * already corrected.
+       */
+      readonly geoidHeight?: number;
+    }
   | {
       readonly kind: 'encode';
       readonly id: number;

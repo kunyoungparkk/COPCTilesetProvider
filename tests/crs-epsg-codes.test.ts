@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
-import { findHorizontalEpsgCode } from '../src/crs/horizontal-code.js';
+import { findHorizontalEpsgCode, findVerticalEpsgCode } from '../src/crs/epsg-codes.js';
 
 describe('findHorizontalEpsgCode against the real file', () => {
   // The whole reason this module exists. Autzen's WKT holds ten AUTHORITY
@@ -96,5 +96,39 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
     ['text that is not WKT', 'not wkt at all'],
   ])('returns null for %s', (_label, wkt) => {
     expect(findHorizontalEpsgCode(wkt)).toBeNull();
+  });
+});
+
+describe('findVerticalEpsgCode', () => {
+  // The whole point: this is how the library learns a file measures height
+  // from a geoid rather than from the ellipsoid.
+  it('finds the vertical system in the real file', async () => {
+    expect(findVerticalEpsgCode(await autzenWkt())).toBe(6360);
+  });
+
+  it('reads the vertical system out of a compound, whichever order it is in', () => {
+    const wkt =
+      'COMPD_CS["c",VERT_CS["v",AUTHORITY["EPSG","6360"]],' +
+      'PROJCS["p",AUTHORITY["EPSG","2992"]]]';
+
+    expect(findVerticalEpsgCode(wkt)).toBe(6360);
+  });
+
+  // A file with no vertical system says nothing about its heights, and the
+  // caller reads that null as "no warning to give".
+  it('returns null when there is no vertical system', () => {
+    const wkt = 'PROJCS["x",GEOGCS["g",AUTHORITY["EPSG","4269"]],AUTHORITY["EPSG","2992"]]';
+
+    expect(findVerticalEpsgCode(wkt)).toBeNull();
+  });
+
+  // The vertical datum sits one level below the vertical system and carries a
+  // code of its own (5103 in the pinned file). Reading that one instead would
+  // name a datum where the caller expects a CRS.
+  it('takes the vertical system and not the vertical datum inside it', () => {
+    const wkt =
+      'VERT_CS["NAVD88",VERT_DATUM["d",2005,AUTHORITY["EPSG","5103"]],AUTHORITY["EPSG","6360"]]';
+
+    expect(findVerticalEpsgCode(wkt)).toBe(6360);
   });
 });

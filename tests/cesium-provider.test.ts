@@ -3,12 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { Cesium3DTileset, Rectangle } from 'cesium';
 import type { Resource } from 'cesium';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COPCTilesetProvider, validateTokenBase } from '../src/cesium-runtime/provider.js';
 import { ScheduledRangeResource } from '../src/cesium-runtime/resource.js';
 import { counterForOrigin } from '../src/budget/host-registry.js';
 import { resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
+import * as crsWorkerModule from '../src/crs/worker.js';
 import * as poolModule from '../src/worker/pool.js';
 import type { WorkerPort } from '../src/worker/pool.js';
 import { autzenWkt } from './autzen-wkt.js';
@@ -132,6 +133,22 @@ const spawnWorker = (): WorkerPort => {
 function contentResourceOf(tile: unknown): unknown {
   return (tile as { _contentResource: unknown })._contentResource;
 }
+
+// Every `fromUrl` in this file loads the pinned Autzen fixture, whose WKT
+// declares vertical CRS EPSG:6360 — so a call that omits `geoidHeight` warns
+// correctly (that is the behaviour under test elsewhere in this file), and
+// without this the warning prints on every one of those runs. Mocked at the
+// file level, rather than per test, so the `geoidHeight` describe block below
+// can assert on the same spy instead of installing a second one.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
 
 describe('COPCTilesetProvider.fromUrl', () => {
   it('issues exactly three requests before the tileset exists (§4)', async () => {
@@ -579,5 +596,81 @@ describe('fromUrl and the caller signal', () => {
       fetch: autzenFetch().fetch,
     });
     provider.destroy();
+  });
+});
+
+describe('geoidHeight', () => {
+  it('hands the same geoid height to both realms', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    // Neither spy below takes `.mockImplementation`, so both call through:
+    // `fromUrl` needs the real pool and the real transform (bounding volumes
+    // and the root geometric error both come from the latter), and a bare
+    // mock would break the rest of the load. `crsWorkerModule` is a namespace
+    // import of the same module `provider.ts` imports
+    // `createTransformFromDefinition` from, so this spy intercepts that exact
+    // call site.
+    const createPool = vi.spyOn(poolModule, 'createWorkerPool');
+    const createTransform = vi.spyOn(crsWorkerModule, 'createTransformFromDefinition');
+    const { fetch } = autzenFetch();
+
+    await COPCTilesetProvider.fromUrl(FILE_URL, {
+      spawnWorker,
+      fetch,
+      geoidHeight: -23.333,
+    });
+
+    // The Worker's half.
+    expect(createPool.mock.calls[0]?.[0]?.geoidHeight).toBe(-23.333);
+    // The main thread's half: `createTransformFromDefinition(definition,
+    // options.geoidHeight)` at provider.ts, the one function both
+    // `regionForKey` and `measureRootGeometricError` read their transform
+    // from. Without this assertion a mutation dropping the second argument
+    // there would pass every test in this file.
+    expect(createTransform.mock.calls[0]?.[1]).toBe(-23.333);
+    createPool.mockRestore();
+    createTransform.mockRestore();
+  });
+
+  // Decision 6's stance, applied to the vertical: a file that says its heights
+  // are geoid-referenced and a caller who said nothing is a mismatch worth
+  // naming — but not worth refusing, since the caller may not know N.
+  it('warns when the file declares a vertical system and no height was given', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const { fetch } = autzenFetch();
+
+    await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const message = String(warnSpy.mock.calls[0]?.[0]);
+    // The message is API: it names the code it found and the call to paste.
+    expect(message).toContain('EPSG:6360');
+    expect(message).toContain('geoidHeight');
+  });
+
+  // 0 is the documented escape hatch for a file whose declared vertical
+  // system is already ellipsoidal (the warning's own text says so) — a
+  // falsy-but-given value that a `geoidHeight !== undefined` guard has to
+  // tell apart from "not given", unlike a bare `if (geoidHeight)` check.
+  it.each([-23.333, 0])('stays quiet when the caller gave a height (%s)', async (geoidHeight) => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const { fetch } = autzenFetch();
+
+    await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch, geoidHeight });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  // A file with no vertical system has said nothing about its heights, so
+  // there is nothing to correct and nothing to warn about.
+  it('stays quiet when the file declares no vertical system', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const wkt = 'PROJCS["Oregon",GEOGCS["NAD83",AUTHORITY["EPSG","4269"]],AUTHORITY["EPSG","2992"]]';
+
+    await COPCTilesetProvider.fromUrl(FILE_URL, {
+      spawnWorker,
+      fetch: autzenFetchWithWkt(wkt).fetch,
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
