@@ -41,6 +41,11 @@ const widget = new Cesium.CesiumWidget('globe', {
 
 const out = document.getElementById('stats');
 
+// Held outside the block so a failure after the counter starts can silence it.
+// Without that, the catch below writes the error and the very next frame paints
+// the counter back over it.
+let stopCounting;
+
 try {
   COPCTilesetProvider.registerCrs(2992, OREGON);
 
@@ -55,7 +60,7 @@ try {
   // as the picture beside it. Written only when it changes — the counts hold
   // still for long stretches whenever the camera does.
   let last;
-  widget.scene.postRender.addEventListener(() => {
+  stopCounting = widget.scene.postRender.addEventListener(() => {
     const { requests, bytesRequested } = provider.stats().range;
     const text = `${requests} range requests\n${(bytesRequested / 1e6).toFixed(1)} MB read`;
     if (text === last) return;
@@ -67,6 +72,7 @@ try {
     offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-32), 0),
   });
 } catch (error) {
+  stopCounting?.();
   // Verbatim. Every failure this library raises is a typed error whose message
   // names the fix — a missing CRS registration prints the registerCrs call to
   // paste, a server that hides Content-Range prints the header to add.
