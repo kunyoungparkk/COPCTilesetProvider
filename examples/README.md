@@ -46,7 +46,11 @@ header the server has to add.
 The globe's basemap comes from Cesium ion when the `CESIUM_ION_TOKEN`
 repository secret is set — `.github/workflows/pages.yml` writes it into the
 page at deploy time, so the token is never committed and rotating it costs a
-secret change rather than a commit.
+secret change rather than a commit. The token needs `assets:read` and access to
+asset `3830182` (Google Maps 2D Satellite); if it restricts origins, the Pages
+URL has to be one of its allowed URLs. A token ion refuses looks exactly like no
+token at all on the globe, so the page logs a console warning when that
+happens.
 
 Without it, and on every local run, the demo uses Natural Earth II from inside
 Cesium's own CDN build: lower resolution, but it cannot be rate-limited or

@@ -64,30 +64,36 @@ function say(text, kind = '') {
   els.status.className = kind;
 }
 
+// Google Maps 2D Satellite. ion's own default is Bing Maps Aerial (asset 2);
+// this one is picked for the close-in view the demo flies to. Reaching it needs
+// a token carrying `assets:read`, and — if the token restricts origins — the
+// deploy URL among its allowed URLs.
+const ION_IMAGERY_ASSET_ID = 3830182;
+
 /**
  * Imagery for the globe, best-effort.
  *
- * ion's world imagery is the only thing here sharp enough to recognise ground
- * under the points, and it needs a token. Without one — every local run, and
- * any deploy where the secret is missing — this uses Natural Earth II, which
- * ships inside Cesium's own CDN build and cannot fail or be rate-limited.
+ * ion's imagery is the only thing here sharp enough to recognise ground under
+ * the points, and it needs a token. Without one — every local run, and any
+ * deploy where the secret is missing — this uses Natural Earth II, which ships
+ * inside Cesium's own CDN build and cannot fail or be rate-limited.
  *
  * Cesium's build carries a shared default token that would work without any of
  * this, but it prints a banner across the bottom of the page asking you not to
  * rely on it, and it is rate-limited globally. So the choice is ours or none.
- *
- * The rejection is caught rather than left to Cesium's error event, so no path
- * here logs to the console.
  */
 async function baseImagery() {
   const token = globalThis.CESIUM_ION_TOKEN;
   if (token) {
     Cesium.Ion.defaultAccessToken = token;
     try {
-      return await Cesium.IonImageryProvider.fromAssetId(2);
-    } catch {
-      // Fall through. A revoked or rate-limited token must not cost the demo
-      // its globe.
+      return await Cesium.IonImageryProvider.fromAssetId(ION_IMAGERY_ASSET_ID);
+    } catch (error) {
+      // A token ion refuses must not cost the demo its globe. It does earn a
+      // warning: on screen a refused token and no token look identical, and
+      // neither cause — a missing scope, an origin the token does not allow —
+      // is visible from the globe.
+      console.warn(`Cesium ion asset ${ION_IMAGERY_ASSET_ID} unavailable:`, error);
     }
   }
   return Cesium.TileMapServiceImageryProvider.fromUrl(
