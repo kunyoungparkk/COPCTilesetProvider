@@ -76,7 +76,8 @@ typed error(Decision 6의 수평 CRS 방식)는 일관되지만 breaking change�
 |---|---|
 | `src/crs/horizontal-code.ts` → `epsg-codes.ts` | 스캔 루프를 내부 `scanAuthorities(wkt)`로 빼고, 그 위에 `findHorizontalEpsgCode`와 신규 `findVerticalEpsgCode` 두 얇은 리더를 얹는다 |
 | `src/crs/transform.ts` | `createTransformFromDefinition(definition, geoidHeight = 0)`. `project`가 `z * metresPerZ + geoidHeight`를 반환 |
-| `src/worker/protocol.ts` | `init` 메시지에 `geoidHeight: number` 추가 |
+| `src/worker/protocol.ts` | `init` 메시지에 `geoidHeight` 추가 |
+| `src/worker/pool.ts` | `WorkerPoolOptions`에 `geoidHeight` 추가 — `init`을 실제로 post하는 곳 |
 | `src/worker/entry.ts` | 검증용 `createTransformFromDefinition` 호출에 넘기고, `definition` 옆에 함께 보관해 `encodeNode`로 전달 |
 | `src/worker/pipeline.ts` | `EncodeNodeInput`에 `geoidHeight: number` 추가 — `encodeNode`가 호출마다 자기 transform을 만들기 때문 |
 | `src/cesium-runtime/provider.ts` | `COPCTilesetProviderOptions.geoidHeight?: number`, 두 realm에 전달, 미지정 시 경고 |
