@@ -41,7 +41,7 @@ describe('package manifest', () => {
   it('resolves the package name to the two entry points a caller needs', () => {
     // Two paths, not one. The root re-exports `COPCTilesetProvider`, which
     // statically imports `cesium` — so a Worker importing it dies, measured
-    // (`docs/cesium-runtime-gate.md`). `./worker` is the Worker realm's own
+    // (`src/cesium-runtime/gate-findings.md`). `./worker` is the Worker realm's own
     // entry, free of Cesium by a check in `tests/worker-boundary.test.ts`.
     // Both point at build output: changing either changes what a consumer can
     // import, so it is pinned here rather than noticed at publish time.

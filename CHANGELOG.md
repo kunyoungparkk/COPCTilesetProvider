@@ -49,7 +49,7 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 - Cesium 1.144 support. The peer range is `>=1.142.0 <1.145.0`, and both ends
   are verified by render rather than by reasoning
-  (`docs/cesium-runtime-gate.md`). The floor is measurement, not choice: 1.141
+  (`src/cesium-runtime/gate-findings.md`). The floor is measurement, not choice: 1.141
   has no `_runtimeContentCodec` slot, so Decision 2's mechanism does not exist
   there.
 

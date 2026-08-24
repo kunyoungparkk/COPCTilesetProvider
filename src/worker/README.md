@@ -83,7 +83,7 @@ CSP blocks `blob:`.
 `browser.ts`'s import closure as well — the Cesium exclusion there is a check,
 not a promise. The render gate measured why it matters: a Worker that reaches
 Cesium dies on `ReferenceError: global is not defined` before handling a single
-message (`docs/cesium-runtime-gate.md`).
+message (`src/cesium-runtime/gate-findings.md`).
 
 Two things that gate found and reading could not. `laz-perf` resolves its
 `.wasm` against wherever its script was served from, which is why

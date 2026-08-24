@@ -314,9 +314,10 @@ of CI — CI stays offline.
    GitHub Release.
 
 Design decisions and their reasoning live in [`OVERVIEW.md`](OVERVIEW.md)
-(Korean). What the Cesium runtime gate measured is in
-[`docs/cesium-runtime-gate.md`](docs/cesium-runtime-gate.md). Repository
-conventions are in [`CLAUDE.md`](CLAUDE.md).
+(Korean). Each directory under `src/` carries a README explaining what it owns;
+what the Cesium runtime gate measured is in
+[`src/cesium-runtime/gate-findings.md`](src/cesium-runtime/gate-findings.md).
+Repository conventions are in [`CLAUDE.md`](CLAUDE.md).
 
 ## License
 

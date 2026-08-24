@@ -46,7 +46,7 @@ for (const entry of entries) {
 }
 // Named separately from the loop above, because "nothing outside dist/" would
 // also be satisfied by a tarball that shipped nothing at all.
-for (const forbidden of ['docs/', 'src/', 'fixtures/', 'tests/', 'gate/', 'smoke/']) {
+for (const forbidden of ['src/', 'fixtures/', 'tests/', 'smoke/']) {
   const leaked = entries.find((entry) => entry.includes(`/${forbidden}`));
   if (leaked !== undefined) throw new Error(`tarball ships ${forbidden}: ${leaked}`);
 }
