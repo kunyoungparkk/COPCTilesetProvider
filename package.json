@@ -47,8 +47,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "rm -rf dist && rolldown -c rolldown.config.mjs && tsc -p tsconfig.build.json && node build/assert-bundles.mjs dist",
-    "smoke": "npm run build && node smoke/run.mjs"
+    "build": "rm -rf dist && rolldown -c rolldown.config.mjs && tsc -p tsconfig.build.json && node build/third-party-notices.mjs dist/THIRD-PARTY-NOTICES.md && node build/assert-bundles.mjs dist",
+    "smoke": "npm run build && node smoke/run.mjs",
+    "notices": "node build/third-party-notices.mjs THIRD-PARTY-NOTICES.md"
   },
   "dependencies": {
     "copc": "^0.0.9",

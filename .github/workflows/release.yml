@@ -1,0 +1,59 @@
+name: Release
+
+# Publishing is a tag push, so the thing that ships and the thing that is
+# tagged cannot disagree. Everything before this — the version bump, the
+# CHANGELOG entry, `npm run smoke` — is the release ritual in README's
+# Development section, and stays on a person's machine: `smoke` installs from
+# the registry, and CLAUDE.md keeps the network out of CI.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # creates the GitHub Release
+  id-token: write # npm provenance, signed by this workflow's OIDC identity
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # The same checks CI runs on every push, repeated here because a tag can
+      # be pushed at a commit CI never saw.
+      - run: npm run typecheck
+      - run: npm test
+
+      # `build` also writes dist/THIRD-PARTY-NOTICES.md and runs the bundle
+      # assertions, so a bundle that lost the inlined wasm, reached Cesium from
+      # the Worker realm, or shipped without notices fails here rather than
+      # after publishing.
+      - run: npm run build
+
+      - name: Refuse a tag that does not match the manifest
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag v$TAG does not match package.json $PKG"
+            exit 1
+          fi
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)."

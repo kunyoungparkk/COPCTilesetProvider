@@ -153,8 +153,8 @@ describe('Cesium runtime content codec contract', () => {
   // Why nothing here aborts a decode. The catch around `makeContent` does not
   // consult `cancelled`, so an aborted decode is a terminal FAILED — worse
   // than the worker slot it would save. If this assertion fails because
-  // Cesium added the check, decode cancellation becomes available;
-  // `docs/superpowers/plans/carried-forward.md` says so in the same words.
+  // Cesium added the check, decode cancellation becomes available and this
+  // library's own cancellation can be widened to take it.
   it('fails a tile whose content creation throws, cancelled or not', () => {
     const makeContent = tile.indexOf('const content = await makeContent(tile, arrayBuffer);');
     expect(makeContent).toBeGreaterThan(-1);

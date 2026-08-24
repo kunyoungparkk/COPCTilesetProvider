@@ -1,11 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { renderNotices } from '../build/third-party-notices.mjs';
+
+const read = (path: string): string =>
+  readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
 const manifest = JSON.parse(
   readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
 ) as {
   name: string;
+  version: string;
   license: string;
   type: string;
   exports: unknown;
@@ -36,7 +41,7 @@ describe('package manifest', () => {
   it('resolves the package name to the two entry points a caller needs', () => {
     // Two paths, not one. The root re-exports `COPCTilesetProvider`, which
     // statically imports `cesium` — so a Worker importing it dies, measured
-    // (`docs/gate-render-findings.md`). `./worker` is the Worker realm's own
+    // (`docs/cesium-runtime-gate.md`). `./worker` is the Worker realm's own
     // entry, free of Cesium by a check in `tests/worker-boundary.test.ts`.
     // Both point at build output: changing either changes what a consumer can
     // import, so it is pinned here rather than noticed at publish time.
@@ -50,9 +55,30 @@ describe('package manifest', () => {
 
   it('ships only the build output', () => {
     // Without `files`, `npm pack` falls back to everything not ignored, which
-    // would put `docs/superpowers/` — plans, specs, this project's internal
-    // notes — in front of every consumer.
+    // would put this project's internal notes in front of every consumer. The
+    // third-party notices ride along inside `dist/`, written there by the
+    // build, so this list stays one entry.
     expect(manifest.files).toEqual(['dist']);
   });
 
+  it('carries third-party notices that match the installed dependencies', () => {
+    // The bundles inline copc, laz-perf and proj4, and minification strips the
+    // license headers that would have travelled with their code — so this file
+    // is the only thing discharging MIT's "include the notice" and Apache's
+    // "include the license". It is generated, so the failure this catches is a
+    // dependency bumped without `npm run notices`.
+    expect(read('../THIRD-PARTY-NOTICES.md')).toBe(renderNotices());
+  });
+
+  it('pins the demo to the version this manifest publishes', () => {
+    // `examples/index.html` loads the *published* package from a CDN, which is
+    // deliberate — it is the only place a defect in the distribution shows up
+    // in something a person looks at. The cost is that the version is written
+    // twice, and a release that bumps one and not the other leaves the demo
+    // silently running old code, dropping options the new version added.
+    // Measured: that is exactly what happened between 0.1.1 and 0.2.0.
+    expect(read('../examples/index.html')).toContain(
+      `copc-tileset-provider@${manifest.version}?external=cesium`,
+    );
+  });
 });

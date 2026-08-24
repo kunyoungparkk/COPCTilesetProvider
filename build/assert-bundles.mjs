@@ -1,8 +1,9 @@
 // What the bundles must be true of, in a form both the build and the publish
 // smoke can run. Each assertion exists because something specific would
 // otherwise regress silently.
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // The wasm is 214,351 bytes and base64 grows it by a third, so a Worker bundle
 // that lost it would fall far below this. Deliberately loose: this catches
@@ -37,6 +38,25 @@ export function assertBundles(distDir) {
   // make a Blob from and every consumer is back to writing `spawnWorker`.
   if (!index.includes('self.onmessage') && !index.includes('onmessage=')) {
     throw new Error('dist/index.js does not contain the inlined Worker source');
+  }
+
+  // Both bundles inline their dependencies, and minification strips the
+  // license headers that would otherwise have travelled with that code — so
+  // the notices file is the only thing carrying it. Read the names from the
+  // manifest rather than listing them here: a dependency added without a
+  // notice is exactly what this catches.
+  const noticesPath = join(distDir, 'THIRD-PARTY-NOTICES.md');
+  if (!existsSync(noticesPath)) {
+    throw new Error(`${noticesPath} is missing; the bundles ship other people's code`);
+  }
+  const notices = readFileSync(noticesPath, 'utf8');
+  const manifest = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+  );
+  for (const name of Object.keys(manifest.dependencies)) {
+    if (!notices.includes(`## ${name} `)) {
+      throw new Error(`THIRD-PARTY-NOTICES.md does not cover the bundled ${name}`);
+    }
   }
 }
 

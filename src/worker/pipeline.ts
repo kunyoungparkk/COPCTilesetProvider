@@ -24,9 +24,8 @@ export interface EncodeNodeInput {
  * The Worker's single entry point, composing the three pipeline stages
  * OVERVIEW §4 names for a point tile: decode, transform to ECEF, encode PNTS.
  *
- * Takes a **definition** and has no path that resolves one — this is the
- * boundary that discharges the debt `docs/superpowers/plans/carried-forward.md`
- * carried forward from the CRS sub-project. `resolveCrsDefinition` runs once,
+ * Takes a **definition** and has no path that resolves one — that is the
+ * boundary this file exists to hold. `resolveCrsDefinition` runs once,
  * on the main thread, at `fromUrl` time, and throws `CrsNotRegisteredError` and
  * `CrsCodeNotFoundError` — errors that have to surface where `fromUrl` can
  * reject. Decision 3 gives a Worker its own copy of module state, so calling

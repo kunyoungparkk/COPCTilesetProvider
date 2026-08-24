@@ -8,7 +8,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { Las, Info, Hierarchy } from 'copc';
 
 const SOURCE = 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz';
-const OUT = new URL('../fixtures/', import.meta.url);
+const OUT = new URL('./', import.meta.url);
 
 // Read before range() is defined, so TOTAL is initialised no matter when the
 // first call happens. Reading it from inside the function while it was still

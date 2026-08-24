@@ -25,5 +25,5 @@ the case OVERVIEW Decision 6 refuses to hand to proj4 whole.
 
 ## Regenerating
 
-`node scripts/cut-fixtures.mjs` re-cuts them from the source URL. It needs the
-network, so run it by hand; CI never does.
+`node fixtures/cut.mjs` re-cuts them from the source URL, next to the slices it
+writes. It needs the network, so run it by hand; CI never does.

@@ -75,7 +75,7 @@ describe('what a Worker can reach through worker/entry.ts', () => {
 // closure decides what actually ships into a Worker. The render gate measured
 // what a Worker that reaches Cesium does: it dies on "ReferenceError: global
 // is not defined" before handling a single message
-// (docs/gate-render-findings.md).
+// (docs/cesium-runtime-gate.md).
 describe('what a Worker can reach through worker/browser.ts', () => {
   const reachable = importClosure('worker/browser.ts');
 

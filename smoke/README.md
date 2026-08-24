@@ -14,8 +14,8 @@ Nothing in it reads this repository's sources — the consumer app imports
 ## What it judges
 
 - **The tarball's contents.** Everything under `dist/`, nothing else. A missing
-  `files` field would otherwise ship `docs/superpowers/` — this project's plans
-  and specs — to every consumer.
+  `files` field would otherwise ship `src/`, `tests/` and `fixtures/` to every
+  consumer.
 - **The installed bundles.** The same assertions the build runs
   (`build/assert-bundles.mjs`), now against what actually installed: the Worker
   does not reach Cesium, the library carries no Node-only built-in, the wasm is

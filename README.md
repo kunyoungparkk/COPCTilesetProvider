@@ -290,16 +290,33 @@ look like something Cesium already knows how to draw.
 ```sh
 npm test          # Vitest, offline, no build required
 npm run typecheck # tsc --noEmit
-npm run build     # rolldown + tsc → dist/
+npm run build     # rolldown + tsc → dist/, with the third-party notices
+npm run notices   # regenerate THIRD-PARTY-NOTICES.md after a dependency bump
 npm run smoke     # pack, install into a temp project, render in headless Chromium
 ```
 
 `npm run smoke` installs from the network and is a pre-publish check, not part
 of CI — CI stays offline.
 
+### Releasing
+
+1. Bump `version` in `package.json` and add the release's section to
+   [`CHANGELOG.md`](CHANGELOG.md).
+2. Bump the pinned version in `examples/index.html`'s import map. The demo
+   loads the *published* package, so a release that skips this leaves it
+   running the previous version — `tests/manifest.test.ts` fails until both
+   agree.
+3. `npm run notices` if any dependency moved.
+4. `npm run smoke` — the one check that judges the packed tarball rather than
+   the source tree.
+5. Commit, then push a `v<version>` tag. `.github/workflows/release.yml` takes
+   it from there: typecheck, test, build, `npm publish --provenance`, and a
+   GitHub Release.
+
 Design decisions and their reasoning live in [`OVERVIEW.md`](OVERVIEW.md)
-(Korean), and the specs and plans behind each subsystem are in
-[`docs/`](docs/). Repository conventions are in [`CLAUDE.md`](CLAUDE.md).
+(Korean). What the Cesium runtime gate measured is in
+[`docs/cesium-runtime-gate.md`](docs/cesium-runtime-gate.md). Repository
+conventions are in [`CLAUDE.md`](CLAUDE.md).
 
 ## License
 

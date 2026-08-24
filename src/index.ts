@@ -71,7 +71,7 @@ export type { BudgetCounterStats, BudgetStats } from './budget/index.js';
  * Keeping it on this barrel is what broke before. This entry re-exports
  * `COPCTilesetProvider`, which statically imports `cesium`, and the render
  * gate measured a Worker importing it dying on `ReferenceError: global is not
- * defined` before handling a message (`docs/gate-render-findings.md`). It also
+ * defined` before handling a message (`docs/cesium-runtime-gate.md`). It also
  * dragged the whole Worker realm — laz-perf and its inlined wasm included —
  * into the library bundle, where nothing on the main thread can use it.
  *
