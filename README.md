@@ -1,5 +1,4 @@
-<!-- Screenshot goes here, directly under the title: a single wide PNG of a real
-     point cloud on the globe. Demo link goes on the line below it. -->
+<img width="1280" height="649" alt="Image" src="https://github.com/user-attachments/assets/18d6bd12-5fce-4b57-859e-4be8a65d3478" />
 
 # copc-tileset-provider
 
