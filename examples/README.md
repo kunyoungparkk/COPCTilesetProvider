@@ -45,18 +45,16 @@ own footprint, not this one copied over.
 
 ## Imagery and terrain
 
-Both come from Cesium ion when the `CESIUM_ION_TOKEN` repository secret is set
-— `pages.yml` writes it into the page at deploy time, so the token is never
-committed and rotating it costs a secret change rather than a commit. The token
-needs `assets:read` and access to asset `3830182` (Google Maps 2D Satellite);
-if it restricts origins, the Pages URL has to be one of its allowed URLs. A
-token ion refuses looks exactly like no token at all on the globe, so the page
-logs a console warning when that happens.
+Both come from Cesium ion, and both need the `CESIUM_ION_TOKEN` repository
+secret — `pages.yml` writes it into the page at deploy time, so the token is
+never committed and rotating it costs a secret change rather than a commit. The
+token needs `assets:read` and access to asset `3830182` (Google Maps 2D
+Satellite); if it restricts origins, the Pages URL has to be one of its allowed
+URLs.
 
-Without a token — every local run — the demo falls back to Natural Earth II
-from inside Cesium's own build, and to the bare ellipsoid instead of terrain.
-The points then hover about 100 m over a globe with no ground to meet them,
-which is expected rather than broken.
+There is no fallback. Without a working token the globe comes up blank, which
+is the same thing a local run gets, and a local run has no dataset to show over
+it either. Cesium logs the refusal; the demo does not dress it up.
 
 ## Why it loads the published package
 
