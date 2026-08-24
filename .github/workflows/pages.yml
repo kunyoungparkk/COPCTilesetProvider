@@ -37,6 +37,22 @@ jobs:
             -o examples/data/autzen-classified.copc.laz
           ls -l examples/data
 
+      - name: Inject the Cesium ion token
+        env:
+          TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "No CESIUM_ION_TOKEN secret. The demo will use Natural Earth II."
+            exit 0
+          fi
+          PAGE=examples/index.html
+          grep -q "window.CESIUM_ION_TOKEN = ''" "$PAGE" \
+            || { echo "token placeholder missing from $PAGE"; exit 1; }
+          sed -i "s|window.CESIUM_ION_TOKEN = ''|window.CESIUM_ION_TOKEN = '$TOKEN'|" "$PAGE"
+          grep -q "window.CESIUM_ION_TOKEN = ''" "$PAGE" \
+            && { echo "substitution did not take"; exit 1; }
+          echo "ion token injected"
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

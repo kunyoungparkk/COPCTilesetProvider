@@ -64,10 +64,39 @@ function say(text, kind = '') {
   els.status.className = kind;
 }
 
+/**
+ * Imagery for the globe, best-effort.
+ *
+ * ion's world imagery is the only thing here sharp enough to recognise ground
+ * under the points, and it needs a token. Without one — every local run, and
+ * any deploy where the secret is missing — this uses Natural Earth II, which
+ * ships inside Cesium's own CDN build and cannot fail or be rate-limited.
+ *
+ * Cesium's build carries a shared default token that would work without any of
+ * this, but it prints a banner across the bottom of the page asking you not to
+ * rely on it, and it is rate-limited globally. So the choice is ours or none.
+ *
+ * The rejection is caught rather than left to Cesium's error event, so no path
+ * here logs to the console.
+ */
+async function baseImagery() {
+  const token = globalThis.CESIUM_ION_TOKEN;
+  if (token) {
+    Cesium.Ion.defaultAccessToken = token;
+    try {
+      return await Cesium.IonImageryProvider.fromAssetId(2);
+    } catch {
+      // Fall through. A revoked or rate-limited token must not cost the demo
+      // its globe.
+    }
+  }
+  return Cesium.TileMapServiceImageryProvider.fromUrl(
+    Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'),
+  );
+}
+
 const viewer = new Cesium.Viewer('globe', {
-  // No imagery and no terrain: both would reach Cesium ion, which needs an
-  // access token this demo has no business shipping, and whose absence logs
-  // errors. The point cloud is the subject; a plain ellipsoid is a fine stage.
+  // Added below instead, so the fallback above can do its job.
   baseLayer: false,
   animation: false,
   timeline: false,
@@ -82,6 +111,9 @@ const viewer = new Cesium.Viewer('globe', {
 });
 viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#11161c');
 viewer.scene.globe.depthTestAgainstTerrain = true;
+void baseImagery().then((provider) => {
+  viewer.imageryLayers.addImageryProvider(provider);
+});
 
 let provider;
 

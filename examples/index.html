@@ -78,6 +78,13 @@
     </div>
 
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"></script>
+    <!-- Rewritten at deploy time from the CESIUM_ION_TOKEN repository secret
+         (.github/workflows/pages.yml). Empty here on purpose: a Cesium ion
+         token is a public, client-side value, but keeping it out of git means
+         rotating it costs a secret change rather than a commit. With it empty
+         — every local run — the demo uses the imagery bundled into Cesium
+         itself and never touches ion. -->
+    <script>window.CESIUM_ION_TOKEN = '';</script>
     <script type="importmap">
       {
         "imports": {

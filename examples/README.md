@@ -41,6 +41,18 @@ That limitation is worth knowing rather than hiding: paste a URL from a host
 with the same gap and the demo prints the library's own error, naming the
 header the server has to add.
 
+## Imagery
+
+The globe's basemap comes from Cesium ion when the `CESIUM_ION_TOKEN`
+repository secret is set — `.github/workflows/pages.yml` writes it into the
+page at deploy time, so the token is never committed and rotating it costs a
+secret change rather than a commit.
+
+Without it, and on every local run, the demo uses Natural Earth II from inside
+Cesium's own CDN build: lower resolution, but it cannot be rate-limited or
+withdrawn. Cesium's bundled default token is deliberately not used — it works,
+but prints a banner across the page asking you not to rely on it.
+
 ## What the demo shows
 
 - **`fromUrl(url)` with nothing else.** No worker to construct, no wasm to
