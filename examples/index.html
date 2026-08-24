@@ -9,75 +9,33 @@
       href="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Widgets/widgets.css"
     />
     <style>
-      :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      :root { color-scheme: dark; }
       html, body { margin: 0; height: 100%; background: #000; color: #e6e6e6; }
       #globe { position: absolute; inset: 0; }
-      #panel {
+      #stats {
         position: absolute; top: 12px; left: 12px; z-index: 10;
-        width: min(420px, calc(100vw - 24px));
-        padding: 14px 16px; border-radius: 10px;
-        background: rgba(18, 18, 20, 0.86); backdrop-filter: blur(6px);
+        max-width: min(420px, calc(100vw - 24px));
+        padding: 9px 11px; border-radius: 6px;
+        background: rgba(13, 13, 15, 0.86); backdrop-filter: blur(6px);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        font-size: 13px; line-height: 1.5;
-      }
-      #panel h1 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
-      #panel p.sub { margin: 0 0 12px; color: #9aa0a6; font-size: 12px; }
-      label { display: block; margin-bottom: 4px; color: #9aa0a6; font-size: 12px; }
-      .row { display: flex; gap: 8px; }
-      input[type='url'] {
-        flex: 1; min-width: 0; padding: 7px 9px; border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        background: #0d0d0f; color: #e6e6e6; font: inherit; font-size: 12px;
-      }
-      button {
-        padding: 7px 13px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18);
-        background: #24242a; color: #e6e6e6; font: inherit; font-size: 12px; cursor: pointer;
-      }
-      button:hover:not(:disabled) { background: #303038; }
-      button:disabled { opacity: 0.5; cursor: default; }
-      fieldset { margin: 12px 0 0; padding: 0; border: 0; }
-      fieldset legend { padding: 0; color: #9aa0a6; font-size: 12px; }
-      .toggles { display: flex; gap: 14px; margin-top: 6px; }
-      .toggles label { display: flex; align-items: center; gap: 6px; margin: 0; color: #e6e6e6; }
-      #status {
-        margin-top: 12px; padding: 9px 10px; border-radius: 6px;
-        background: #0d0d0f; border: 1px solid rgba(255, 255, 255, 0.1);
         white-space: pre-wrap; word-break: break-word;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px; line-height: 1.6;
       }
-      #status.error { border-color: #a3352f; color: #ffb4ae; }
-      #status.ok { border-color: #2f6b3a; }
-      a { color: #8ab4f8; }
+      #stats.error { border-color: #a3352f; color: #ffb4ae; }
     </style>
   </head>
   <body>
     <div id="globe"></div>
+    <div id="stats"></div>
 
-    <div id="panel">
-      <h1>copc-tileset-provider</h1>
-      <p class="sub">
-        A COPC file streamed straight into CesiumJS — no pre-tiling, no backend.
-        <a href="https://github.com/kunyoungparkk/COPCTilesetProvider">source</a>
-      </p>
-
-      <label for="url">COPC URL</label>
-      <div class="row">
-        <input id="url" type="url" spellcheck="false" />
-        <button id="load" type="button">Load</button>
-      </div>
-
-      <fieldset>
-        <legend>Classification filter (Cesium3DTileStyle)</legend>
-        <div class="toggles">
-          <label><input id="ground" type="checkbox" checked /> Ground</label>
-          <label><input id="colorByClass" type="checkbox" /> Colour by class</label>
-        </div>
-      </fieldset>
-
-      <div id="status">idle</div>
-    </div>
-
-    <script src="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"></script>
+    <!-- Where Cesium finds its own Workers, wasm and Assets/. The IIFE build
+         infers this from the `<script>` tag that loaded it; an ES module has no
+         such tag, so it has to be said. -->
+    <script>
+      window.CESIUM_BASE_URL =
+        'https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/';
+    </script>
     <!-- Rewritten at deploy time from the CESIUM_ION_TOKEN repository secret
          (.github/workflows/pages.yml). Empty here on purpose: a Cesium ion
          token is a public, client-side value, but keeping it out of git means
@@ -85,10 +43,15 @@
          — every local run — the demo uses the imagery bundled into Cesium
          itself and never touches ion. -->
     <script>window.CESIUM_ION_TOKEN = '';</script>
+    <!-- One Cesium, reached by one specifier. The library imports `cesium` too,
+         and `?external=cesium` keeps it a bare import, so it resolves through
+         this same entry: two copies of the engine would make `provider.tileset`
+         a Cesium3DTileset from the wrong one, and `scene.primitives.add` fails
+         on a class identity check. -->
     <script type="importmap">
       {
         "imports": {
-          "cesium": "./cesium-shim.js",
+          "cesium": "https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/index.js",
           "copc-tileset-provider": "https://esm.sh/copc-tileset-provider@0.2.0?external=cesium"
         }
       }
