@@ -22,6 +22,9 @@ check rather than part of CI.
 
 ## Where the reasoning lives
 
+- [`docs/architecture.md`](docs/architecture.md) — start here. How a frame
+  becomes tiles, what each directory owns, and the three import boundaries the
+  suite enforces.
 - [`OVERVIEW.md`](OVERVIEW.md) — the design decisions and why each was made.
   Written in Korean: it is this project's planning language, and its six
   numbered decisions are binding on new work. If you are proposing something

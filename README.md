@@ -251,8 +251,9 @@ them, or a specific class for one.
 ## Contributing
 
 How to run the suite, what review looks for, and how a release is cut:
-[CONTRIBUTING.md](CONTRIBUTING.md). Design decisions and their reasoning are in
-[OVERVIEW.md](OVERVIEW.md) (Korean).
+[CONTRIBUTING.md](CONTRIBUTING.md). How the pieces fit together:
+[docs/architecture.md](docs/architecture.md). The decisions behind them, with
+their reasoning and measurements: [OVERVIEW.md](OVERVIEW.md) (Korean).
 
 ## License
 
