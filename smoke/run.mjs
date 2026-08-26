@@ -21,8 +21,37 @@ const PORT = Number(process.env.SMOKE_PORT ?? 8933);
 // expanded range means anything: `SMOKE_CESIUM=1.142.0 npm run smoke`.
 const CESIUM = `cesium@${process.env.SMOKE_CESIUM ?? '1.144.0'}`;
 
-const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+// `npm` and `npx` are `.cmd` shims on Windows: `execFileSync` cannot find
+// either by bare name, and Node refuses to spawn a `.cmd` at all without a
+// shell. Nothing else here needs this — `tar` is a real executable on Windows
+// 10 and later, and the server below is spawned as `process.execPath`.
+const SHELL_ONLY_ON_WINDOWS = new Set(['npm', 'npx']);
+
+// A shell means the arguments stop being a list: Node joins them with spaces
+// and quotes nothing, so an argument containing one is read as two. That is
+// not hypothetical here — every path passed below descends from `tmpdir()`,
+// which on Windows sits under the user's name.
+const quoteForShell = (arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg);
+
+/**
+ * The `execFileSync` arguments for one command, adjusted for the shims above.
+ * Shared rather than folded into `run`, because the Playwright call below
+ * needs its own stdio and environment and so cannot go through it.
+ */
+const shimmed = (cmd, args) => {
+  const shell = process.platform === 'win32' && SHELL_ONLY_ON_WINDOWS.has(cmd);
+  return { args: shell ? args.map(quoteForShell) : args, shell };
+};
+
+const run = (cmd, args, cwd) => {
+  const { args: spawnArgs, shell } = shimmed(cmd, args);
+  return execFileSync(cmd, spawnArgs, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    ...(shell && { shell: true }),
+  });
+};
 
 const step = (message) => console.log(`\n── ${message}`);
 
@@ -30,11 +59,16 @@ const work = mkdtempSync(join(tmpdir(), 'copc-smoke-'));
 console.log(`smoke workspace: ${work}`);
 
 step('npm pack');
-const tarball = join(work, run('npm', ['pack', '--pack-destination', work], REPO).trim());
+const tarballName = run('npm', ['pack', '--pack-destination', work], REPO).trim();
+const tarball = join(work, tarballName);
 console.log(tarball);
 
 step('what the tarball contains');
-const entries = run('tar', ['-tzf', tarball])
+// Named relative to `work` rather than absolutely, because GNU tar reads the
+// colon in `C:\...` as a host separator and tries to reach a machine called
+// `C` — and `--force-local`, which would tell it otherwise, is a GNU option
+// that the bsdtar on macOS does not have. A path with no colon needs neither.
+const entries = run('tar', ['-tzf', tarballName], work)
   .split('\n')
   .map((line) => line.trim())
   .filter(Boolean);
@@ -108,11 +142,19 @@ const server = spawn(
 );
 try {
   await new Promise((resolve) => setTimeout(resolve, 500));
-  execFileSync(
-    'npx',
-    ['playwright', 'test', '--config', 'smoke/playwright.config.mjs', '--reporter=list'],
-    { cwd: REPO, stdio: 'inherit', env: { ...process.env, SMOKE_PORT: String(PORT) } },
-  );
+  const playwright = shimmed('npx', [
+    'playwright',
+    'test',
+    '--config',
+    'smoke/playwright.config.mjs',
+    '--reporter=list',
+  ]);
+  execFileSync('npx', playwright.args, {
+    cwd: REPO,
+    stdio: 'inherit',
+    env: { ...process.env, SMOKE_PORT: String(PORT) },
+    ...(playwright.shell && { shell: true }),
+  });
 } finally {
   server.kill();
 }
