@@ -70,14 +70,14 @@ export class UnsupportedHeaderLayoutError extends CopcTilesetError {
 }
 
 /**
- * The file's points carry no colour.
+ * The file's point data record format is not one COPC allows.
  *
- * COPC allows point data record formats 6, 7 and 8, and only 7 and 8 have RGB
- * (`copc.js`'s own extractor for format 6 exposes no `Red`, `Green` or `Blue`).
- * This library encodes `RGB` into every PNTS tile, so a format-6 file has
- * nothing to render from — and refusing at open is the difference between one
- * error naming the file and one untyped throw per tile, inside a Worker,
- * after the globe has loaded.
+ * COPC requires formats 6, 7 or 8, all three of which this library renders
+ * (`src/worker/pnts.ts` ships colour for the two that carry it). A file
+ * declaring anything else is a LAS or LAZ file rather than a COPC one, and
+ * `copc.js`'s extractor has no branch for it: reaching a Worker, it would
+ * throw an untyped error per tile, after the globe has loaded. Refusing at
+ * open names the file and the format once instead.
  */
 export class UnsupportedPointFormatError extends CopcTilesetError {
   readonly code = 'unsupported-point-format';
@@ -85,13 +85,12 @@ export class UnsupportedPointFormatError extends CopcTilesetError {
 
   constructor(url: string, pointDataRecordFormat: number) {
     super(
-      `${url} uses point data record format ${pointDataRecordFormat}, which carries no ` +
-        'colour. This library needs RGB, so only formats 7 and 8 can be rendered. ' +
-        'Nothing can add colour a file does not have — if the source data has it, ' +
-        're-exporting from that source is the fix, and PDAL picks a colour-carrying ' +
-        'format on its own when the points it is given have colour ' +
-        '(`pdal translate coloured-input.las output.copc.laz`). If the source has no ' +
-        'colour either, this library cannot render it.',
+      `${url} uses point data record format ${pointDataRecordFormat}, which COPC does not ` +
+        'allow. COPC requires format 6, 7 or 8, and this library renders all three. ' +
+        'A file using another format is plain LAS or LAZ rather than COPC, whatever its ' +
+        'name says, and has to be converted before it can be streamed ' +
+        '(`pdal translate input.laz output.copc.laz`). Conversion picks a COPC-legal ' +
+        'format on its own, keeping colour when the points have it.',
     );
     this.pointDataRecordFormat = pointDataRecordFormat;
   }

@@ -147,6 +147,14 @@ without it Cesium builds no feature table and there is nothing to read.
 
 Read this section before deciding whether the library fits.
 
+**Point formats 6, 7 and 8 — the three COPC allows.** Any other format is
+plain LAS or LAZ rather than COPC, whatever the file is named, and `fromUrl`
+refuses it with the format named and the conversion to run. Points take the
+file's own colour, which format 6 does not carry: those tiles arrive uncoloured
+and Cesium draws them in its constant dark grey until a style gives them a
+colour. Everything else is unaffected — the batch-table properties below are
+all present, so [styling and picking](#styling-and-picking) work the same.
+
 **Heights are ellipsoidal.** Every Z is height above the WGS84 ellipsoid.
 Orthometric data — most surveyed LiDAR — sits at a visible vertical offset
 until you pass the geoid separation at your dataset's location, in metres:

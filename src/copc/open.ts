@@ -6,12 +6,15 @@ import type { HierarchyPage } from './hierarchy.js';
 import { readHierarchyPage } from './hierarchy.js';
 import { readWkt } from './wkt.js';
 
-// Only formats 7 and 8 carry the RGB every PNTS tile needs (src/worker/pnts.ts
-// writes it unconditionally). Checked here, right after the header is parsed
-// and before anything reads on, so a format-6 file is refused once at open
-// with the file named — not once per tile, inside a Worker, after the globe
-// has already loaded.
-const FORMATS_WITH_COLOUR = new Set([7, 8]);
+// The three point data record formats COPC allows. Anything else is a plain
+// LAS/LAZ file, which copc.js's extractor cannot read at all. Checked here,
+// right after the header is parsed and before anything reads on, so such a
+// file is refused once at open with the file named — not once per tile,
+// inside a Worker, after the globe has already loaded.
+//
+// Format 6 is on this list and carries no colour; `src/worker/pnts.ts` omits
+// the RGB section for it rather than refusing the file.
+const COPC_POINT_FORMATS = new Set([6, 7, 8]);
 
 export interface CopcFile {
   readonly header: Las.Header;
@@ -43,7 +46,7 @@ export interface CopcFile {
 export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile> {
   const { header, info, totalBytes } = await readFileHeader(reader, signal);
 
-  if (!FORMATS_WITH_COLOUR.has(header.pointDataRecordFormat)) {
+  if (!COPC_POINT_FORMATS.has(header.pointDataRecordFormat)) {
     throw new UnsupportedPointFormatError(reader.url, header.pointDataRecordFormat);
   }
 

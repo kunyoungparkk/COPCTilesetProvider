@@ -15,17 +15,20 @@ import type { RelativePositions } from './positions.js';
  * `PntsParser`).
  *
  * What ships, and why: `POSITION` (the caller's float32 tile-relative
- * positions) with `RTC_CENTER`; `RGB` from the file's own colour, which
- * Autzen carries because it is point format 7; `BATCH_ID` per point, so a
- * pick resolves to a point; and a batch table of classification, intensity,
- * GPS time, return number and number of returns — the five a point-cloud
- * viewer actually styles and filters on. `PointSourceId` is deliberately not
- * among them, and the reason is the shape of the bet rather than a guess at
- * how often callers want it: adding a property later is backward-compatible,
- * because every style string written against the existing set keeps working,
- * while removing or narrowing one is not. Leaving a property out is therefore
- * the reversible half and costs nothing permanent; putting one in is the half
- * that cannot be taken back.
+ * positions) with `RTC_CENTER`; `RGB` from the file's own colour, for the two
+ * of COPC's three point formats that carry any — Autzen is format 7, which
+ * does, and a format-6 tile ships without the section, which Cesium renders
+ * as its own constant dark grey (`Model/PntsLoader.js`'s
+ * `defaultColorAttribute`) until a style says otherwise; `BATCH_ID` per
+ * point, so a pick resolves to a point; and a batch table of classification,
+ * intensity, GPS time, return number and number of returns — the five a
+ * point-cloud viewer actually styles and filters on. `PointSourceId` is
+ * deliberately not among them, and the reason is the shape of the bet rather
+ * than a guess at how often callers want it: adding a property later is
+ * backward-compatible, because every style string written against the
+ * existing set keeps working, while removing or narrowing one is not. Leaving
+ * a property out is therefore the reversible half and costs nothing
+ * permanent; putting one in is the half that cannot be taken back.
  *
  * GPS time is safe only because `BATCH_ID` is present, and the two cannot be
  * revisited separately. Verified against installed Cesium 1.143.0 (`cesium`
@@ -155,9 +158,19 @@ function padTrailing(json: string, precedingBytes: number): string {
  * `PositionCountMismatchError`'s own doc comment for why the check stays
  * even though nothing in this library's own pipeline can trigger it.
  *
+ * A view whose format carries no colour (LAS point format 6, one of the three
+ * COPC allows) gets no `RGB` section at all. It sits last in the feature
+ * table and is the only section whose length is not already a multiple of 8,
+ * so omitting it moves no other section's byte offset and the layout's
+ * alignment rule is unchanged — `tests/worker-pnts.test.ts` pins both facts
+ * rather than leaving them as reasoning. Cesium then renders the tile in the
+ * constant dark grey `Model/PntsLoader.js:508` holds for exactly this case;
+ * no colour is invented here, because a value this library made up would be
+ * indistinguishable, to a caller, from one the file supplied.
+ *
  * LAS colour is 16-bit (`Red`/`Green`/`Blue`), PNTS `RGB` is 8-bit per
  * channel, so some conversion has to happen; `>>> 8` is what this module
- * does, unconditionally, for every file. What settles that choice for
+ * does, for every file that has colour at all. What settles that choice for
  * *this* file: measured on `fixtures/autzen-node-5-16-3-1.bin` (47 points,
  * all three channels, every point), every value is an exact multiple of 256
  * and none is a multiple of 257 — this file's real colour precision is 8
@@ -184,9 +197,18 @@ export function encodePnts(view: View, placed: RelativePositions): ArrayBuffer {
     throw new PositionCountMismatchError(count, placed.positions.length);
   }
 
-  const getRed = view.getter('Red');
-  const getGreen = view.getter('Green');
-  const getBlue = view.getter('Blue');
+  // COPC allows point formats 6, 7 and 8; only 7 and 8 carry colour, so this
+  // is one of the three shapes a valid file arrives in, not an error case.
+  // The view is asked rather than the header because the view is the one
+  // place that knows which dimensions its format carries — `Dimensions.create`
+  // and `getter` are built from the same extractor map, so they cannot
+  // disagree, while a second format-number test in this module could drift
+  // from the one in `src/copc/open.ts`. Measured across all three formats:
+  // `Red` is among a view's dimensions for 7 and 8, and absent for 6
+  // (`copc.js`'s `create7` introduces all three channels together, so the one
+  // test settles the other two).
+  const hasColour = view.dimensions.Red !== undefined;
+
   const getClassification = view.getter('Classification');
   const getIntensity = view.getter('Intensity');
   const getGpsTime = view.getter('GpsTime');
@@ -208,20 +230,28 @@ export function encodePnts(view: View, placed: RelativePositions): ArrayBuffer {
     placed.positions.byteLength,
   );
   const batchIdBytes = writeBatchIds(count, batchId.size);
-  const rgb = new Uint8Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    rgb[i * 3] = getRed(i) >>> 8;
-    rgb[i * 3 + 1] = getGreen(i) >>> 8;
-    rgb[i * 3 + 2] = getBlue(i) >>> 8;
+  let rgb: Uint8Array | undefined;
+  if (hasColour) {
+    const getRed = view.getter('Red');
+    const getGreen = view.getter('Green');
+    const getBlue = view.getter('Blue');
+    rgb = new Uint8Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      rgb[i * 3] = getRed(i) >>> 8;
+      rgb[i * 3 + 1] = getGreen(i) >>> 8;
+      rgb[i * 3 + 2] = getBlue(i) >>> 8;
+    }
   }
-  const featureTableBinary = concatBytes([positionBytes, batchIdBytes, rgb]);
+  const featureTableBinary = concatBytes(
+    rgb ? [positionBytes, batchIdBytes, rgb] : [positionBytes, batchIdBytes],
+  );
 
   const featureTableJson = {
     POINTS_LENGTH: count,
     RTC_CENTER: placed.rtcCenter,
     POSITION: { byteOffset: 0 },
     BATCH_ID: { byteOffset: positionBytes.byteLength, componentType: batchId.name },
-    RGB: { byteOffset: positionBytes.byteLength + batchIdBytes.byteLength },
+    ...(rgb && { RGB: { byteOffset: positionBytes.byteLength + batchIdBytes.byteLength } }),
     BATCH_LENGTH: count,
   };
   const featureTableJsonPadded = padTrailing(JSON.stringify(featureTableJson), HEADER_LENGTH);

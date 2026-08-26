@@ -9,6 +9,13 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ### Added
 
+- LAS point data record format 6 opens and renders. COPC allows formats 6, 7
+  and 8; only 7 and 8 carry colour, and this library refused 6 outright
+  because its PNTS encoder wrote an `RGB` section for every tile. The section
+  is now written only for a file that has colour, so a format-6 file — common
+  for surveyed LiDAR, which often carries no colour at all — loads with every
+  batch-table property intact and renders in Cesium's constant dark grey until
+  a style gives it a colour.
 - `THIRD-PARTY-NOTICES.md`, shipped inside `dist/`. The bundles inline copc,
   laz-perf and proj4, and minification strips the license headers that would
   otherwise have travelled with their code — the published 0.1.x and 0.2.0
@@ -16,6 +23,13 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
   `npm run notices`, and asserted current by `tests/manifest.test.ts`.
 - A release workflow: pushing a `v*` tag builds, publishes with npm provenance,
   and opens a GitHub Release.
+
+### Changed
+
+- `UnsupportedPointFormatError` now means "not a format COPC allows" rather
+  than "carries no colour", and its message says which formats would have
+  worked. Its `code` and `pointDataRecordFormat` are unchanged; only a caller
+  matching on the message text is affected.
 
 ## [0.2.0] — 2026-08-25
 

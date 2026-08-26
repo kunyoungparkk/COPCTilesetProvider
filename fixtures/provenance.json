@@ -1,53 +1,97 @@
 {
-  "source": "https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz",
-  "totalBytes": 81123042,
-  "etag": "\"dbb36ebb301306feb94c5e313524492c-10\"",
-  "cut": {
-    "autzen-head.bin": {
-      "offset": 0,
-      "length": 589,
-      "sha256": "784841800b5b03619ee3b568f9ff5ac407e1ddff46ba317048597d938401063d",
-      "why": "Decision 4's first read: LAS header + COPC info VLR"
+  "sources": [
+    {
+      "source": "https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz",
+      "totalBytes": 81123042,
+      "etag": "\"dbb36ebb301306feb94c5e313524492c-10\"",
+      "cut": {
+        "autzen-head.bin": {
+          "offset": 0,
+          "length": 589,
+          "sha256": "784841800b5b03619ee3b568f9ff5ac407e1ddff46ba317048597d938401063d",
+          "why": "Decision 4's first read: LAS header + COPC info VLR"
+        },
+        "autzen-vlrs.bin": {
+          "offset": 375,
+          "length": 1361,
+          "sha256": "d696b7b86708050f3f2bd02f36a0c9e77f4e6c2d45309fd1d662e2d0a33e7297",
+          "why": "the VLR region, where the WKT record lives"
+        },
+        "autzen-root-hierarchy.bin": {
+          "offset": 81114146,
+          "length": 8896,
+          "sha256": "b937e87a8b7b9d7e62bff0e431d349a4d84709fd60c1cfcd3e4dc863253c4d53",
+          "why": "the root hierarchy page"
+        },
+        "autzen-node-5-16-3-1.bin": {
+          "offset": 53565789,
+          "length": 951,
+          "sha256": "32bc4c827b9eff0888ceec7f26f17c032def30b823f0afc266d8b423e2b18591",
+          "why": "node 5-16-3-1, the file's smallest, for decode fixtures checkable by hand"
+        }
+      },
+      "observed": {
+        "headerLength": 375,
+        "pointDataOffset": 1736,
+        "vlrCount": 3,
+        "pointDataRecordFormat": 7,
+        "pointCount": 10653336,
+        "cube": [
+          635577.79,
+          848882.15,
+          406.1400000000003,
+          640233.3,
+          853537.66,
+          5061.65000000001
+        ],
+        "spacing": 36.37117187500007,
+        "rootHierarchyPage": {
+          "pageOffset": 81114146,
+          "pageLength": 8896
+        },
+        "nodeCount": 278,
+        "subPageCount": 0
+      }
     },
-    "autzen-vlrs.bin": {
-      "offset": 375,
-      "length": 1361,
-      "sha256": "d696b7b86708050f3f2bd02f36a0c9e77f4e6c2d45309fd1d662e2d0a33e7297",
-      "why": "the VLR region, where the WKT record lives"
-    },
-    "autzen-root-hierarchy.bin": {
-      "offset": 81114146,
-      "length": 8896,
-      "sha256": "b937e87a8b7b9d7e62bff0e431d349a4d84709fd60c1cfcd3e4dc863253c4d53",
-      "why": "the root hierarchy page"
-    },
-    "autzen-node-5-16-3-1.bin": {
-      "offset": 53565789,
-      "length": 951,
-      "sha256": "32bc4c827b9eff0888ceec7f26f17c032def30b823f0afc266d8b423e2b18591",
-      "why": "node 5-16-3-1, the file's smallest, for decode fixtures checkable by hand"
+    {
+      "source": "https://s3.amazonaws.com/hobu-lidar/sofi.copc.laz",
+      "totalBytes": 2029696615,
+      "etag": "\"5d92a180a4c9890a51ba04a6fb107f26-242\"",
+      "cut": {
+        "sofi-head.bin": {
+          "offset": 0,
+          "length": 589,
+          "sha256": "cea38cd767d5601577e3858e0447fb1a8e441bc476a0e26d07baa532eb39b0b3",
+          "why": "Decision 4's first read: LAS header + COPC info VLR"
+        },
+        "sofi-node-6-23-29-3.bin": {
+          "offset": 407039109,
+          "length": 608,
+          "sha256": "98405d2d7ca1a22b164c10469089cd1c87004a4ac26f615bf8a16e72efc3c3f1",
+          "why": "node 6-23-29-3, the file's smallest, for a format-6 decode fixture"
+        }
+      },
+      "observed": {
+        "headerLength": 375,
+        "pointDataOffset": 1545,
+        "pointDataRecordFormat": 6,
+        "pointDataRecordLength": 30,
+        "pointCount": 364384576,
+        "scale": [
+          0.001,
+          0.001,
+          0.001
+        ],
+        "offset": [
+          376331.56,
+          3757833.285,
+          27.238
+        ],
+        "smallestNode": {
+          "key": "6-23-29-3",
+          "pointCount": 45
+        }
+      }
     }
-  },
-  "observed": {
-    "headerLength": 375,
-    "pointDataOffset": 1736,
-    "vlrCount": 3,
-    "pointDataRecordFormat": 7,
-    "pointCount": 10653336,
-    "cube": [
-      635577.79,
-      848882.15,
-      406.1400000000003,
-      640233.3,
-      853537.66,
-      5061.65000000001
-    ],
-    "spacing": 36.37117187500007,
-    "rootHierarchyPage": {
-      "pageOffset": 81114146,
-      "pageLength": 8896
-    },
-    "nodeCount": 278,
-    "subPageCount": 0
-  }
+  ]
 }

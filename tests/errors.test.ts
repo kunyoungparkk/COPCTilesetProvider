@@ -185,21 +185,24 @@ describe('UnsupportedHeaderLayoutError', () => {
 });
 
 describe('UnsupportedPointFormatError', () => {
+  // Format 3 throughout, not 6: COPC allows 6, 7 and 8, so 6 is a format this
+  // library opens and no longer one this error can carry.
   it('gives every error a stable code and the base type', () => {
-    const error = new UnsupportedPointFormatError('https://host/a.copc.laz', 6);
+    const error = new UnsupportedPointFormatError('https://host/a.copc.laz', 3);
 
     expect(error).toBeInstanceOf(CopcTilesetError);
     expect(error.code).toBe('unsupported-point-format');
     expect(error.name).toBe('UnsupportedPointFormatError');
-    expect(error.pointDataRecordFormat).toBe(6);
+    expect(error.pointDataRecordFormat).toBe(3);
   });
 
   it('names the file, the format, and the fix', () => {
-    const message = new UnsupportedPointFormatError('https://host/a.copc.laz', 6).message;
+    const message = new UnsupportedPointFormatError('https://host/a.copc.laz', 3).message;
 
     expect(message).toContain('https://host/a.copc.laz');
-    expect(message).toContain('format 6');
-    expect(message).toContain('colour');
+    expect(message).toContain('format 3');
+    // What the reader has to know to act: which formats would have worked.
+    expect(message).toContain('format 6, 7 or 8');
     // The one action that turns this file into one we can read.
     expect(message).toContain('pdal translate');
   });

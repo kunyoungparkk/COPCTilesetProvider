@@ -162,11 +162,11 @@ describe('openCopc', () => {
     await expect(failure).rejects.toThrow('10653336');
   });
 
-  // COPC allows point data record formats 6, 7 and 8, and only 7 and 8 carry
-  // RGB (copc.js's own extractor for format 6 defines no Red/Green/Blue).
-  // This library encodes RGB into every PNTS tile, so a format-6 file has
-  // nothing to render from — refusing at open names the file once, instead
-  // of an untyped throw per tile inside a Worker after the globe has loaded.
+  // COPC allows point data record formats 6, 7 and 8, and all three open.
+  // Anything else is not a COPC file: copc.js's extractor has no branch for
+  // it and throws an untyped error the first time a Worker decodes a chunk —
+  // per tile, after the globe has loaded. Refusing at open names the file and
+  // the format once instead.
   describe('point data record format', () => {
     // Byte 104 packs the format in its low nibble and LAZ's compression flag
     // in the high bit (`node_modules/copc/lib/las/header.js`: `dv.getUint8(104)
@@ -194,40 +194,49 @@ describe('openCopc', () => {
       },
     });
 
-    it('refuses a format that carries no colour', async () => {
+    it('refuses a format COPC does not allow', async () => {
       const { reader, reads } = autzenReader();
-      const withFormat6 = withPatchedHead(reader, reads, patchPointFormat(6));
+      // 3 is a real LAS format (colour and GPS time, legacy point record) and
+      // a valid choice for a plain LAZ file — it is only COPC that excludes
+      // it. Chosen over a nonsense number for that reason: it is the mistake
+      // someone actually makes, by pointing this library at a LAZ file that
+      // was never COPC.
+      const withFormat3 = withPatchedHead(reader, reads, patchPointFormat(3));
 
-      const failure = openCopc(withFormat6);
+      const failure = openCopc(withFormat3);
 
       await expect(failure).rejects.toMatchObject({
         code: 'unsupported-point-format',
-        pointDataRecordFormat: 6,
+        pointDataRecordFormat: 3,
       });
       await expect(failure).rejects.toThrow('https://host/autzen.copc.laz');
-      await expect(failure).rejects.toThrow('6');
+      await expect(failure).rejects.toThrow('3');
     });
 
-    it('opens formats 7 and 8, which carry RGB', async () => {
+    // One case per accepted format, so the check cannot degenerate into an
+    // allow-list of whichever one the fixture happens to be.
+    it.each([6, 7, 8])('opens format %i, which COPC allows', async (format) => {
       const { reader, reads } = autzenReader();
-      // Autzen is already format 7; format 8 is the one that needs constructing.
-      // Only the format byte is patched, so this file is not a real format-8
-      // record — a genuine one is 38 bytes per point rather than the 36 the
+      // Autzen is already format 7; 6 and 8 are patched in. Only the format
+      // byte changes, so neither is a real record of its format — a genuine
+      // format-6 point is 30 bytes and a format-8 one 38, against the 36 this
       // header still declares. `openCopc` never reads a point body, so the
       // inconsistency is invisible to what is under test, and what this pins
-      // is exactly one thing: 8 is on the accepted side of the check.
-      const withFormat8 = withPatchedHead(reader, reads, patchPointFormat(8));
+      // is exactly one thing: each format is on the accepted side of the
+      // check. Whether a colourless file then *encodes* is
+      // `tests/worker-pnts.test.ts`'s question, not this one's.
+      const patched = withPatchedHead(reader, reads, patchPointFormat(format));
 
-      const file = await openCopc(withFormat8);
+      const file = await openCopc(patched);
 
-      expect(file.header.pointDataRecordFormat).toBe(8);
+      expect(file.header.pointDataRecordFormat).toBe(format);
     });
 
     it('refuses before the hierarchy page is read', async () => {
       const { reader, reads } = autzenReader();
-      const withFormat6 = withPatchedHead(reader, reads, patchPointFormat(6));
+      const withFormat3 = withPatchedHead(reader, reads, patchPointFormat(3));
 
-      await expect(openCopc(withFormat6)).rejects.toMatchObject({
+      await expect(openCopc(withFormat3)).rejects.toMatchObject({
         code: 'unsupported-point-format',
       });
       // Only the header/info read happened — no read for the WKT VLR region

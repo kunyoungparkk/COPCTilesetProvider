@@ -61,6 +61,9 @@ function readPntsHeader(buffer: ArrayBuffer) {
     POSITION: { byteOffset: number };
     RTC_CENTER: [number, number, number];
     POINTS_LENGTH: number;
+    // Optional because a format-6 tile ships without it — the shape of the
+    // absence a colourless view produces, not a convenience.
+    RGB?: { byteOffset: number };
   };
   const featureTableBinaryStart = featureTableJsonStart + featureTableJsonByteLength;
   const batchTableBinaryStart =
@@ -118,30 +121,61 @@ async function importEngineModule<T>(path: string): Promise<T> {
   return (await import(resolved)) as T;
 }
 
+const SYNTHETIC_VALUES: Record<string, number> = {
+  Red: 256,
+  Green: 512,
+  Blue: 768,
+  Classification: 2,
+  Intensity: 100,
+  GpsTime: 12345.5,
+  ReturnNumber: 1,
+  NumberOfReturns: 2,
+};
+
+const COLOUR_DIMENSIONS = ['Red', 'Green', 'Blue'];
+
 /**
- * A minimal `View` good enough for `encodePnts`'s own contract: only the six
- * getters it actually reads (`view.dimensions` is never touched), each
- * returning one fixed value regardless of point index. Good for testing the
- * header/layout logic (byte counts, alignment, `BATCH_ID` sizing) in
- * isolation from any real LAS point format — not a stand-in for a real
- * decoded chunk, which the main `describe` above already covers.
+ * A minimal `View` good enough for `encodePnts`'s own contract: only the
+ * getters it actually reads, each returning one fixed value regardless of
+ * point index. Good for testing the header/layout logic (byte counts,
+ * alignment, `BATCH_ID` sizing) in isolation from any real LAS point format —
+ * not a stand-in for a real decoded chunk, which the main `describe` above
+ * already covers.
+ *
+ * `dimensions` lists exactly the names `getter` will serve, because
+ * `encodePnts` reads it to decide whether this view has colour. A view that
+ * declared `{}` while serving colour anyway — which this helper used to do,
+ * back when nothing read the field — would send every test through the
+ * colourless branch and leave the RGB one unexercised. The real
+ * `Las.View.create` keeps the two in step by construction (`Dimensions.create`
+ * is built from the same extractor map `getter` looks in), so a helper that
+ * lets them disagree is modelling a view that cannot exist.
+ *
+ * `type`/`size` are the LAS types copc.js's own `typemap` gives these names;
+ * `encodePnts` only tests for presence, but a wrong type here would make the
+ * helper a worse model of a real view for whatever reads it next.
  */
-function syntheticView(count: number): View {
+function syntheticView(count: number, { colour = true } = {}): View {
+  const names = Object.keys(SYNTHETIC_VALUES).filter(
+    (name) => colour || !COLOUR_DIMENSIONS.includes(name),
+  );
+  const dimensions = Object.fromEntries(
+    names.map((name) => [
+      name,
+      name === 'GpsTime'
+        ? ({ type: 'float', size: 8 } as const)
+        : name === 'Red' || name === 'Green' || name === 'Blue' || name === 'Intensity'
+          ? ({ type: 'unsigned', size: 2 } as const)
+          : ({ type: 'unsigned', size: 1 } as const),
+    ]),
+  );
   return {
     pointCount: count,
-    dimensions: {},
+    dimensions,
     getter: (name: string) => {
-      const values: Record<string, number> = {
-        Red: 256,
-        Green: 512,
-        Blue: 768,
-        Classification: 2,
-        Intensity: 100,
-        GpsTime: 12345.5,
-        ReturnNumber: 1,
-        NumberOfReturns: 2,
-      };
-      const value = values[name];
+      const value = names.includes(name) ? SYNTHETIC_VALUES[name] : undefined;
+      // copc.js's own wording, so a test that trips this branch fails the way
+      // a real colourless view would (`Las.View.create`'s `getter`).
       if (value === undefined) throw new Error(`No extractor for dimension: ${name}`);
       return () => value;
     },
@@ -507,6 +541,169 @@ describe('encodePnts on synthetic views (counts a 47-point fixture cannot reach)
     // id, not merely "the wrong type name" — checked directly rather than
     // only checking the label.
     expect(new Set(result.batchIds.typedArray).size).toBe(count);
+  });
+});
+
+describe('encodePnts on a real format-6 chunk (SoFi, decoded end to end)', () => {
+  // The counterpart to the synthetic cases below, and the one that decides
+  // whether format 6 actually works: real LAZ bytes somebody else wrote,
+  // through the same three stages a Worker runs — decodeChunk, then
+  // toRelativePositions, then encodePnts — with no test double anywhere.
+  // A synthetic view can only prove the encoder does what this suite thinks
+  // a colourless view looks like; this proves what one is.
+  //
+  // EPSG:32611, the file's own horizontal CRS (WGS 84 / UTM zone 11N). The
+  // definition is inline rather than read from a WKT fixture: this test is
+  // about the encoder, and the VLR region is not among SoFi's cut slices.
+  const UTM11N = '+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs';
+  // The header's own count for node 6-23-29-3, recorded in provenance.json
+  // when the chunk was cut.
+  const SOFI_NODE_POINTS = 45;
+
+  let view: View;
+  let buffer: ArrayBuffer;
+
+  beforeAll(async () => {
+    const { header } = await readFileHeader(bufferReader(fixture('sofi-head.bin')));
+    expect(header.pointDataRecordFormat).toBe(6);
+
+    view = await decodeChunk(fixture('sofi-node-6-23-29-3.bin'), header, SOFI_NODE_POINTS);
+    const placed = toRelativePositions(view, createTransformFromDefinition(UTM11N));
+    buffer = encodePnts(view, placed);
+  });
+
+  it('decodes to a view that really has no colour', () => {
+    // The premise the encoder branches on, measured on the file rather than
+    // assumed from its format number.
+    expect(view.pointCount).toBe(SOFI_NODE_POINTS);
+    expect(view.dimensions.Red).toBeUndefined();
+    expect(view.dimensions.Green).toBeUndefined();
+    expect(view.dimensions.Blue).toBeUndefined();
+    expect(() => view.getter('Red')).toThrow(/No extractor for dimension: Red/);
+  });
+
+  it('encodes a tile Cesium parses, with no colour and every point present', async () => {
+    const { default: PntsParser } = await importEngineModule<{
+      default: { parse: (buffer: ArrayBuffer) => any };
+    }>('Scene/PntsParser.js');
+    const result = PntsParser.parse(buffer);
+
+    expect(result.pointsLength).toBe(SOFI_NODE_POINTS);
+    expect(result.hasColors).toBe(false);
+    expect(result.colors).toBeUndefined();
+    expect(new Set(result.batchIds.typedArray).size).toBe(SOFI_NODE_POINTS);
+  });
+
+  it('carries the file\'s own batch-table values, not zeros', async () => {
+    // A colourless tile could still be uniformly empty and pass everything
+    // above. These are the file's real numbers, read back off the encoded
+    // bytes and compared against the view they came from — which is what
+    // distinguishes "encoded the points" from "encoded a hole".
+    const { default: PntsParser } = await importEngineModule<{
+      default: { parse: (buffer: ArrayBuffer) => any };
+    }>('Scene/PntsParser.js');
+    const { default: parseBatchTable } = await importEngineModule<{
+      default: (options: {
+        count: number;
+        batchTable: unknown;
+        binaryBody: unknown;
+        parseAsPropertyAttributes: boolean;
+      }) => any;
+    }>('Scene/parseBatchTable.js');
+    const parsed = PntsParser.parse(buffer);
+    const structural = parseBatchTable({
+      count: SOFI_NODE_POINTS,
+      batchTable: parsed.batchTableJson,
+      binaryBody: parsed.batchTableBinary,
+      parseAsPropertyAttributes: false,
+    });
+
+    const table = structural.propertyTables[0];
+    const read = (name: string, index: number) =>
+      table.getProperty(index, name) ?? table.getPropertyBySemantic?.(index, name);
+
+    const getClassification = view.getter('Classification');
+    const getIntensity = view.getter('Intensity');
+    const getGpsTime = view.getter('GpsTime');
+    for (let i = 0; i < SOFI_NODE_POINTS; i++) {
+      expect(read('Classification', i)).toBe(getClassification(i));
+      expect(read('Intensity', i)).toBe(getIntensity(i));
+      expect(read('GpsTime', i)).toBe(getGpsTime(i));
+    }
+    // Not all one value, or the loop above would pass on a constant tile.
+    const gpsTimes = new Set(
+      Array.from({ length: SOFI_NODE_POINTS }, (_, i) => getGpsTime(i)),
+    );
+    expect(gpsTimes.size).toBeGreaterThan(1);
+  });
+});
+
+describe('encodePnts on a view with no colour (LAS point format 6)', () => {
+  // Synthetic counterparts to the decoded SoFi chunk above, for the counts a
+  // 45-point fixture cannot reach and the layout arithmetic that depends on
+  // them. The real chunk decides that format 6 works; these decide that it
+  // keeps working at 1 point and at 24.
+  const placedFor = (count: number): RelativePositions => ({
+    rtcCenter: [1, 2, 3],
+    positions: Float32Array.from({ length: count * 3 }, (_, i) => i),
+  });
+
+  it('omits the RGB section rather than failing on the missing getter', async () => {
+    const buffer = encodePnts(syntheticView(4, { colour: false }), placedFor(4));
+
+    const parsed = readPntsHeader(buffer);
+    expect(parsed.featureTableJson.RGB).toBeUndefined();
+
+    // Cesium's own parser is what decides whether the tile is coherent, not
+    // our reading of our own bytes: a feature table that declared no colour
+    // but still carried its bytes would pass the assertion above.
+    const { default: PntsParser } = await importEngineModule<{
+      default: { parse: (buffer: ArrayBuffer) => any };
+    }>('Scene/PntsParser.js');
+    const result = PntsParser.parse(buffer);
+    expect(result.hasColors).toBe(false);
+    expect(result.colors).toBeUndefined();
+  });
+
+  it('still carries positions, batch ids and every batch-table property', async () => {
+    // The half that a "just drop the colour" change could silently break:
+    // RGB sat last in the feature table, so removing it moves no other
+    // section's offset — and this is what proves that claim rather than
+    // assuming it.
+    const buffer = encodePnts(syntheticView(4, { colour: false }), placedFor(4));
+
+    const { default: PntsParser } = await importEngineModule<{
+      default: { parse: (buffer: ArrayBuffer) => any };
+    }>('Scene/PntsParser.js');
+    const result = PntsParser.parse(buffer);
+
+    expect(result.pointsLength).toBe(4);
+    expect(Array.from(result.positions.typedArray.slice(0, 3))).toEqual([0, 1, 2]);
+    expect(new Set(result.batchIds.typedArray).size).toBe(4);
+
+    const properties = result.batchTableJson;
+    expect(Object.keys(properties)).toEqual([
+      'GpsTime',
+      'Intensity',
+      'Classification',
+      'ReturnNumber',
+      'NumberOfReturns',
+    ]);
+  });
+
+  it('keeps the tile 8-byte aligned without the RGB section', () => {
+    // RGB is `count * 3` bytes, so dropping it shifts the batch table by a
+    // multiple of 3 — the one section length in this layout that is not
+    // already a multiple of 8. Every count from 1 to 24 rather than one:
+    // whether a given count needs padding is arithmetic no single case pins.
+    for (let count = 1; count <= 24; count++) {
+      const parsed = readPntsHeader(
+        encodePnts(syntheticView(count, { colour: false }), placedFor(count)),
+      );
+      expect(parsed.featureTableBinaryStart % 8).toBe(0);
+      expect(parsed.batchTableBinaryStart % 8).toBe(0);
+      expect(parsed.byteLength % 8).toBe(0);
+    }
   });
 });
 
