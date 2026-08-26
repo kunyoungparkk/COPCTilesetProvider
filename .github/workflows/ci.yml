@@ -10,11 +10,23 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Both hosts, because three of this repository's bugs were invisible on
+    # one of them: `path.relative` answers in the host separator, a `new URL()`
+    # over an absolute path reads `C:` as a scheme, and git's Windows default
+    # checks text files out as CRLF where a test compares them byte for byte
+    # against generated LF. Each was a no-op on Linux, so a Linux-only CI
+    # reported green while a Windows clone could not run the suite at all.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
+          # Not `.nvmrc`: that file states the floor contributors install,
+          # while CI should also see the newest 22.x a user might have.
           node-version: 22
           cache: npm
       - run: npm ci
