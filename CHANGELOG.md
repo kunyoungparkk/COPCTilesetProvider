@@ -7,6 +7,19 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+### Changed
+
+- **`engines.node` is now `>=24`**, up from `>=22`. This is a browser library,
+  so the floor is about the toolchain rather than the runtime a consumer's page
+  uses, but it is raised rather than left generous because nothing below 24 is
+  built or tested any more: the suite starts Worker threads on `.ts` entry
+  points, and publishing needs the npm 11.5.1 that Node 24 bundles and Node 22
+  does not.
+- Releases publish over OIDC (npm trusted publishing) instead of an automation
+  token, which npm withdrew after the May 2026 account compromises. The
+  workflow now holds no npm credential, and provenance is attached
+  automatically rather than by a `--provenance` flag.
+
 ## [0.3.0] — 2026-08-27
 
 ### Added

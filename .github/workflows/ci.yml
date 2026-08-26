@@ -27,7 +27,7 @@ jobs:
         with:
           # Not `.nvmrc`: that file states the floor contributors install,
           # while CI should also see the newest 22.x a user might have.
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run typecheck

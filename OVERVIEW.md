@@ -154,7 +154,11 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
 
 ## 5. 기술 스택
 
-- 언어/런타임: TypeScript 7, 브라우저 ESM, Node 22(개발·CI)
+- 언어/런타임: TypeScript 7, 브라우저 ESM, Node 24(개발·CI)
+  - 하한이 24인 것은 두 가지 실측의 합이다: `node:worker_threads` Worker를 `.ts`
+    엔트리로 띄우는 테스트가 플래그 없는 타입 스트리핑을 요구하고, npm의
+    trusted publishing(OIDC)이 npm 11.5.1 이상을 요구한다. Node 24는 npm 11.19를
+    싣고, Node 22는 npm 10을 싣는다.
   - TS 7의 `typescript` 패키지는 네이티브 컴파일러 래퍼라 JS 컴파일러 API를
     노출하지 않는다(7.0.2에서 `createProgram`·`createSourceFile` 부재 실측).
     결정 2의 경계 정적 검사를 typescript-eslint·ts-morph 위에 지을 수 없으므로

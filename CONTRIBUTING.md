@@ -5,14 +5,15 @@ Thanks for looking. Issues and pull requests are welcome at
 
 ## Running things
 
-Node **22.18.0 or newer** — `.nvmrc` pins it, so `nvm use` picks it up. That
-floor is not a preference: three test files start a real `node:worker_threads`
-Worker on a `.ts` entry point, and Node runs TypeScript without a flag only
-from 22.18.0 (where [type stripping became the
-default](https://nodejs.org/en/blog/release/v22.18.0), backported from 23.6).
-On anything older those tests fail with `Unknown file extension ".ts"` while
-the rest of the suite passes, which reads like a broken checkout rather than a
-Node version.
+Node **24 or newer** — `.nvmrc` pins it, so `nvm use` picks it up, and
+`engines` says the same so `npm install` warns rather than letting you find out
+later. Two things depend on that floor and neither is a preference. Three test
+files start a real `node:worker_threads` Worker on a `.ts` entry point, so Node
+has to strip types without a flag; on anything older they fail with `Unknown
+file extension ".ts"` while the rest of the suite passes, which reads like a
+broken checkout rather than a Node version. And publishing needs npm 11.5.1 or
+later for the OIDC exchange below — Node 24 bundles npm 11.19, Node 22 bundles
+npm 10.
 
 ```sh
 npm install
