@@ -34,6 +34,20 @@ library refuses rather than guessing, which is also why that URL cannot drive a
 cross-origin demo. `.github/workflows/pages.yml` downloads the file during
 deployment; it is never committed.
 
+## The style panel
+
+The four radio buttons on the right set `provider.tileset.style` and do
+nothing else. `Classification` is reachable from them because the worker
+writes it into the PNTS batch table (OVERVIEW Decision 6), so Cesium's own
+style language addresses it the way it would on any 3D Tiles content — the
+filtering runs in the point cloud shader, not in this library, and no tile is
+re-requested or re-decoded when the selection changes.
+
+`Intensity` sits in the batch table beside it and is styleable the same way.
+The panel leaves it out because a ramp that reads well needs this dataset's
+actual intensity range, and that range is a property of the file rather than
+of the format.
+
 ## Vertical datum
 
 Autzen's Z is NAVD88 orthometric height, not ellipsoidal, so `main.js` passes
