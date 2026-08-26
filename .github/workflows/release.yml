@@ -17,6 +17,24 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # First, before five minutes of install, test and build are spent on a
+      # run that cannot finish. v0.3.0 was this workflow's first real tag and
+      # it died at `npm publish` with nothing to say: the secret had never been
+      # created, and the only clue was a 403 in a log the maintainer had to go
+      # and open. A missing secret is the one failure here that no amount of
+      # reading the diff explains, so it says its own name.
+      - name: Refuse to start without the publish token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::The NPM_TOKEN secret is not set, so this tag cannot publish."
+            echo "Create an npm *Automation* token (a classic or granular token still"
+            echo "prompts for 2FA, which no CI can answer), then add it under"
+            echo "Settings > Secrets and variables > Actions as NPM_TOKEN."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
