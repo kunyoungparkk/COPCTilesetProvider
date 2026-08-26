@@ -5,12 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# The demo streams a COPC file with Range requests, and the library verifies
-# every response's Content-Range (Decision 4). A browser hides that header
-# unless the server sends Access-Control-Expose-Headers, and the public Autzen
-# bucket does not — measured. Serving the file from Pages alongside the page
-# makes it same-origin, where CORS never applies. The file is fetched here
-# rather than committed: this repository holds no datasets.
+# The demo streams the public Autzen file cross-origin, straight from its own
+# bucket. It used to be copied into this artifact instead: the library refused
+# a response whose Content-Range it could not read, the browser hides that
+# header unless the server exposes it, and that bucket does not. Decision 4 now
+# accepts such a response on its status and body length, so the copy is gone —
+# with it an 81 MB download per deploy, and a first load that failed because
+# Pages could not answer a Range for an object its CDN had not cached yet.
 permissions:
   contents: read
   pages: write
@@ -28,14 +29,6 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Fetch the demo dataset
-        run: |
-          mkdir -p examples/data
-          curl -fsSL --retry 3 \
-            https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz \
-            -o examples/data/autzen-classified.copc.laz
-          ls -l examples/data
 
       - name: Inject the Cesium ion token
         env:

@@ -26,13 +26,17 @@ run has no file to open and prints the library's own error saying so. Point
 
 ## Where the data comes from
 
-Autzen is served from this same origin, next to the page, because its public
-bucket does not expose `Content-Range` to browsers. It sends the header —
-`curl` sees it — but omits `Access-Control-Expose-Headers`, and `Content-Range`
-is not on the CORS-safelisted response list, so JavaScript cannot read it. The
-library refuses rather than guessing, which is also why that URL cannot drive a
-cross-origin demo. `.github/workflows/pages.yml` downloads the file during
-deployment; it is never committed.
+Autzen streams from its own public bucket, cross-origin, with nothing copied or
+re-hosted for this page. That bucket sends `Content-Range` — `curl` sees it —
+but omits `Access-Control-Expose-Headers`, and `Content-Range` is not on the
+CORS-safelisted response list, so JavaScript cannot read it. Decision 4 accepts
+such a response on its status and the exact length of its body, which is what
+lets the demo point straight at a file it does not own.
+
+It used to be copied into the deployment instead, and that cost more than the
+81 MB per deploy: the first load after each one failed, because Pages could not
+answer a Range for an object its CDN had not cached yet, and only the second
+visit worked.
 
 ## The style panel
 

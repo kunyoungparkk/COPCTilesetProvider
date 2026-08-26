@@ -59,12 +59,45 @@ describe('createRangeReader', () => {
     ).rejects.toMatchObject({ code: 'range-unsupported', status: 200 });
   });
 
-  it('reports an unreadable Content-Range as a server configuration problem', async () => {
+  // Decision 4: a browser hides `Content-Range` from JavaScript unless the
+  // server exposes it, and no public COPC dataset does — measured. So an
+  // unreadable header is the ordinary cross-origin case, not a fault, and what
+  // remains readable (the 206 and the body's length) is what the range is
+  // verified against instead. The one thing that check cannot confirm is
+  // *which* bytes came back.
+  it('accepts a 206 whose Content-Range is unreadable when the length matches', async () => {
     const { fetch } = stubFetch(partial(new ArrayBuffer(4), null));
+
+    const { bytes, totalBytes } = await createRangeReader(FILE_URL, { fetch }).read({
+      offset: 0,
+      length: 4,
+    });
+
+    expect(bytes.byteLength).toBe(4);
+    // Nothing disclosed the file's size: the header that carries it is the one
+    // that could not be read. `null` is the same answer a `bytes 0-3/*` gives.
+    expect(totalBytes).toBeNull();
+  });
+
+  it('rejects an unreadable Content-Range when the length does not match', async () => {
+    // The only check left once the header is gone, so a truncated body has to
+    // fail here or nothing catches it.
+    const { fetch } = stubFetch(partial(new ArrayBuffer(2), null));
 
     await expect(
       createRangeReader(FILE_URL, { fetch }).read({ offset: 0, length: 4 }),
     ).rejects.toMatchObject({ code: 'content-range-unreadable' });
+  });
+
+  it('still rejects a 200 when Content-Range is unreadable', async () => {
+    // The relaxation is about *which* bytes, never about accepting the whole
+    // file: a server that ignores Range answers 200, and that is still the
+    // failure Decision 4 exists to prevent.
+    const { fetch } = stubFetch(new Response(new ArrayBuffer(4), { status: 200 }));
+
+    await expect(
+      createRangeReader(FILE_URL, { fetch }).read({ offset: 0, length: 4 }),
+    ).rejects.toMatchObject({ code: 'range-unsupported', status: 200 });
   });
 
   it('rejects a response for a different range', async () => {
@@ -211,7 +244,10 @@ describe('retry policy', () => {
   it.each([
     ['a 404', () => new Response(null, { status: 404 })],
     ['a 200', () => new Response(new ArrayBuffer(2), { status: 200 })],
-    ['an unreadable Content-Range', () => partial(new ArrayBuffer(2), null)],
+    // One byte against the two asked for. An unreadable Content-Range is no
+    // longer a failure on its own, so the case that must not be retried is the
+    // length check failing with no header left to explain it.
+    ['a short body with no Content-Range', () => partial(new ArrayBuffer(1), null)],
   ])('does not retry %s', async (_label, makeResponse) => {
     const { fetch, calls } = stubFetch(makeResponse());
 

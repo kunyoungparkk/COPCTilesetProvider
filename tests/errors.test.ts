@@ -43,10 +43,18 @@ describe('transport errors', () => {
     expect(message).toContain('Accept-Ranges');
   });
 
-  it('names the exact header a cross-origin server has to expose', () => {
-    const message = new ContentRangeUnreadableError('https://cdn/a.copc.laz').message;
+  it('names the byte counts that disagreed and the header that would explain them', () => {
+    const error = new ContentRangeUnreadableError('https://cdn/a.copc.laz', 589, 12);
 
-    expect(message).toContain('Access-Control-Expose-Headers: Content-Range');
+    expect(error.expectedBytes).toBe(589);
+    expect(error.receivedBytes).toBe(12);
+    // The counts are the whole of what this error knows, so both belong in the
+    // text and not only on the object.
+    expect(error.message).toContain('589');
+    expect(error.message).toContain('12');
+    // Exposing the header does not fix the mismatch, but it is what turns this
+    // into a diagnosable one.
+    expect(error.message).toContain('Access-Control-Expose-Headers: Content-Range');
   });
 
   it('marks server failures (5xx) differently from client errors (4xx)', () => {

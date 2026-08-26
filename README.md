@@ -18,7 +18,9 @@ Point it at a URL and it renders:
 ```js
 COPCTilesetProvider.registerCrs(2992, '+proj=lcc +lat_0=41.75 +lon_0=-120.5 …');
 
-const provider = await COPCTilesetProvider.fromUrl('https://example.com/autzen.copc.laz');
+const provider = await COPCTilesetProvider.fromUrl(
+  'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz',
+);
 viewer.scene.primitives.add(provider);
 viewer.camera.flyTo({ destination: provider.extent });
 ```
@@ -56,12 +58,15 @@ COPCTilesetProvider.registerCrs(
 const viewer = new Viewer('cesiumContainer');
 
 const provider = await COPCTilesetProvider.fromUrl(
-  'https://example.com/autzen.copc.laz',
+  'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz',
 );
 
 viewer.scene.primitives.add(provider);
 viewer.camera.flyTo({ destination: provider.extent });
 ```
+
+That URL is real — the public Autzen stadium scan, 81 MB, streamed a few
+hundred kilobytes at a time. Paste the block and it renders.
 
 `provider` is a Cesium primitive: `scene.primitives.add` takes it directly, and
 `provider.destroy()` releases the tileset, the Worker pool and every outstanding
@@ -109,12 +114,17 @@ full-file download, which is the thing this library exists to avoid.
 Two consequences worth checking before you file a bug:
 
 - **The host must serve `206`.** Most static hosts do. Some CDNs and proxies
-  strip Range support on compressed responses.
-- **Cross-origin needs one extra header.** Browsers hide `Content-Range` from
-  JavaScript unless the server sends
-  `Access-Control-Expose-Headers: Content-Range`. Without it the response cannot
-  be verified at all, so the request fails immediately with a typed error naming
-  the header rather than retrying.
+  strip Range support on compressed responses. A `200` is refused outright —
+  that is the whole file, and accepting it is the failure this rule exists to
+  prevent.
+- **Cross-origin, verification is one notch weaker, and that is expected.**
+  Browsers hand JavaScript only the CORS-safelisted response headers, and
+  `Content-Range` is not one of them unless the server sends
+  `Access-Control-Expose-Headers: Content-Range` — which no public COPC dataset
+  does. When the header is readable, the range is checked against it exactly.
+  When it is not, the response is accepted on its status and the exact length
+  of its body; what cannot then be confirmed is *which* bytes came back. Send
+  the header if you control the host and want the stronger check.
 
 ## Styling and picking
 

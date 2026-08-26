@@ -26,6 +26,24 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ### Changed
 
+- **Behaviour:** a `206` whose `Content-Range` cannot be read is now accepted,
+  verified against its status and the exact length of its body, where it
+  previously failed with `ContentRangeUnreadableError`. Cross-origin, a browser
+  withholds that header unless the server sends
+  `Access-Control-Expose-Headers: Content-Range`, and no public COPC dataset
+  does — so this refusal excluded every public file from browser use, including
+  the Autzen scan this project tests against. What the weaker check cannot
+  confirm is *which* bytes came back; a `200` is still refused outright, so the
+  whole-file download this rule exists to prevent is unaffected. OVERVIEW
+  Decision 4 records the measurement behind the change.
+- `ContentRangeUnreadableError` now reports a length mismatch on a response
+  whose `Content-Range` was unreadable, carrying `expectedBytes` and
+  `receivedBytes`. Its `code` is unchanged. It no longer fires merely because
+  the header was absent.
+- The demo streams Autzen cross-origin from its public bucket instead of
+  serving a copy from its own origin. The copy cost 81 MB per deploy and broke
+  the first load after each one, because Pages could not answer a Range for an
+  object its CDN had not cached yet.
 - `UnsupportedPointFormatError` now means "not a format COPC allows" rather
   than "carries no colour", and its message says which formats would have
   worked. Its `code` and `pointDataRecordFormat` are unchanged; only a caller

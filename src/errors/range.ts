@@ -87,25 +87,34 @@ export class RangeTimeoutError extends CopcTilesetError {
 }
 
 /**
- * A 206 arrived with no readable `Content-Range`.
+ * A 206 with no readable `Content-Range` delivered the wrong number of bytes.
  *
- * Decision 4 treats this as fatal rather than retryable: for a cross-origin
- * file the browser hides the header unless the server opts in, and nothing the
- * library does on a second attempt will change that.
+ * An unreadable header is not itself an error (Decision 4): cross-origin, the
+ * browser withholds it unless the server names it in
+ * `Access-Control-Expose-Headers`, and no public COPC dataset does. Such a
+ * response is accepted on the length of its body instead — which makes that
+ * length the whole of the verification, and this the failure when it does not
+ * hold. Fatal rather than retryable, like every other verification failure:
+ * a second identical request gets the same answer.
  */
 export class ContentRangeUnreadableError extends CopcTilesetError {
   readonly code = 'content-range-unreadable';
   readonly url: string;
+  readonly expectedBytes: number;
+  readonly receivedBytes: number;
 
-  constructor(url: string) {
+  constructor(url: string, expectedBytes: number, receivedBytes: number) {
     super(
-      `${url} returned 206 but its Content-Range header could not be read, so the ` +
-        'response cannot be verified. For a cross-origin file the browser hides that ' +
-        'header unless the server sends `Access-Control-Expose-Headers: Content-Range`. ' +
-        'That is a server setting this library cannot work around, and retrying will ' +
-        'not change it.',
+      `${url} returned 206 with ${receivedBytes} bytes where ${expectedBytes} were asked ` +
+        'for, and its Content-Range header could not be read, so nothing else can say ' +
+        'what the response actually was. If the file is cross-origin, the browser hides ' +
+        'that header unless the server sends ' +
+        '`Access-Control-Expose-Headers: Content-Range`; sending it would turn this into ' +
+        'a message naming the range the server thought it was answering.',
     );
     this.url = url;
+    this.expectedBytes = expectedBytes;
+    this.receivedBytes = receivedBytes;
   }
 }
 

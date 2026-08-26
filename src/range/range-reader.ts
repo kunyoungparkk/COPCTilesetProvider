@@ -244,17 +244,21 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
         throw new RangeUnsupportedError(url, response.status);
       }
 
+      // Absent rather than wrong, most often: cross-origin, a browser hands
+      // JavaScript only the CORS-safelisted response headers, and
+      // `Content-Range` is not among them unless the server names it in
+      // `Access-Control-Expose-Headers`. Decision 4 accepts such a response on
+      // what is still readable — the 206 above and the body's length below —
+      // because no public COPC dataset exposes the header, and refusing meant
+      // refusing all of them.
       const header = response.headers.get('content-range');
-      if (header === null) {
-        void response.body?.cancel();
-        throw new ContentRangeUnreadableError(url);
-      }
-
-      const parsed = parseContentRange(header);
-      const lastByte = range.offset + range.length - 1;
-      if (parsed === null || parsed.start !== range.offset || parsed.end !== lastByte) {
-        void response.body?.cancel();
-        throw new ContentRangeMismatchError(url, requested, header);
+      const parsed = header === null ? null : parseContentRange(header);
+      if (header !== null) {
+        const lastByte = range.offset + range.length - 1;
+        if (parsed === null || parsed.start !== range.offset || parsed.end !== lastByte) {
+          void response.body?.cancel();
+          throw new ContentRangeMismatchError(url, requested, header);
+        }
       }
 
       // The deadline has to cover this read too: for a static byte range,
@@ -264,15 +268,24 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
       // nothing if the clock stops before this line runs.
       const bytes = await response.arrayBuffer();
       if (bytes.byteLength !== range.length) {
-        // The header agreed but the body did not — a truncated or rewritten response.
-        throw new ContentRangeMismatchError(
-          url,
-          `${requested} (${range.length} bytes)`,
-          `${header} (${bytes.byteLength} bytes)`,
-        );
+        // With the header, this says it agreed and the body did not — a
+        // truncated or rewritten response. Without it, this *is* the whole
+        // verification, so the same mismatch has to be reported as what it
+        // leaves the caller unable to establish.
+        throw header === null
+          ? new ContentRangeUnreadableError(url, range.length, bytes.byteLength)
+          : new ContentRangeMismatchError(
+              url,
+              `${requested} (${range.length} bytes)`,
+              `${header} (${bytes.byteLength} bytes)`,
+            );
       }
 
-      return { bytes, totalBytes: parsed.totalBytes };
+      // `null` when the header was unreadable: the file's size travels in it,
+      // and nothing else in the response carries it. Callers already treat
+      // this as optional — a server may answer `bytes 0-3/*` — and nothing in
+      // the library reads it.
+      return { bytes, totalBytes: parsed?.totalBytes ?? null };
     } catch (cause) {
       // The caller's abort also trips our deadline controller, so this has to
       // come first — otherwise a cancelled read is reported as a timeout.

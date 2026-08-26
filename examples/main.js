@@ -2,10 +2,10 @@ import * as Cesium from 'cesium';
 import { COPCTilesetProvider } from 'copc-tileset-provider';
 
 // Autzen, the classic LiDAR test scene, stored in EPSG:2992 (Oregon Statewide
-// Lambert, international feet). Served from this same origin — see
-// examples/README.md for why the demo does not stream it from its public
-// bucket.
-const FILE_URL = new URL('./data/autzen-classified.copc.laz', location.href).href;
+// Lambert, international feet). Streamed straight from its public bucket,
+// cross-origin, which is the demo's point: nothing is copied or re-hosted for
+// this page to work.
+const FILE_URL = 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz';
 
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
