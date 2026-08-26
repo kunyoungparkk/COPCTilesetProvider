@@ -33,7 +33,9 @@ npm install copc-tileset-provider cesium
 
 `0.x` on purpose: every release is packed, installed into a throwaway project
 and rendered in headless Chromium, but nobody outside this repository has lived
-with the API yet, so it may still move.
+with the API yet, so it may still move. What moved, and what it means for code
+you have already written, is in [CHANGELOG.md](CHANGELOG.md) — behaviour
+changes are called out as such.
 
 Cesium is a peer dependency, `>=1.142.0 <1.145.0`. Both ends of that range are
 rendered in a real browser before it is widened.
