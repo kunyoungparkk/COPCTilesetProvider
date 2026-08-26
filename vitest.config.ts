@@ -33,5 +33,24 @@ export default defineConfig({
     // fixtures on disk, so Node is the cheaper and more honest environment.
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Several suites import Cesium's engine source — a large ESM graph pulled
+    // through Vite's transform pipeline, once per file because each runs
+    // isolated. Some do it in a `beforeAll`, some in the test body, so both
+    // clocks need the same allowance for the same reason.
+    //
+    // Vitest's defaults (10s hooks, 5s tests) hold on a warm Linux checkout
+    // and do not on a cold Windows one under full parallel load. Measured
+    // here: `tests/worker-pnts.test.ts` failed with `Hook timed out in
+    // 10000ms` and `tests/cesium-contract.test.ts` with `Test timed out in
+    // 5000ms` — but not on every run and not always the same file, since what
+    // decides it is which one loses the race for the machine that time. Both
+    // passed alone, and every one of them passed with the clocks raised, so
+    // what is being bought here is import time, not a hang.
+    //
+    // Something that genuinely wedges now takes 30s to say so. The whole
+    // suite finishes well inside two minutes, so that is a trade the failure
+    // path can afford.
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
   },
 });
