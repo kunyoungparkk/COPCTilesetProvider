@@ -5,6 +5,15 @@ Thanks for looking. Issues and pull requests are welcome at
 
 ## Running things
 
+Node **22.18.0 or newer** — `.nvmrc` pins it, so `nvm use` picks it up. That
+floor is not a preference: three test files start a real `node:worker_threads`
+Worker on a `.ts` entry point, and Node runs TypeScript without a flag only
+from 22.18.0 (where [type stripping became the
+default](https://nodejs.org/en/blog/release/v22.18.0), backported from 23.6).
+On anything older those tests fail with `Unknown file extension ".ts"` while
+the rest of the suite passes, which reads like a broken checkout rather than a
+Node version.
+
 ```sh
 npm install
 npm test          # Vitest, offline, no build required
