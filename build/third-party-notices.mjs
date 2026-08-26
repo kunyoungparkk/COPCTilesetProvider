@@ -33,9 +33,13 @@ function shippedLicense(packageDir) {
     /^(licence|license|copying|notice)(\..*)?$/i.test(name),
   );
   const first = names.sort()[0];
-  return first === undefined
-    ? undefined
-    : readFileSync(new URL(`${packageDir}/${first}`, import.meta.url), 'utf8').trim();
+  // A plain path, not a `new URL(...)`: `packageDir` is already an absolute
+  // filesystem path (its caller ran it through `fileURLToPath`), and on
+  // Windows that starts `C:\`, which the URL parser reads as the scheme `c:`
+  // — `TypeError: The URL must be of scheme file`, before any license is
+  // read. `readdirSync` above and the `package.json` read below both take the
+  // path directly; this line was the one that did not.
+  return first === undefined ? undefined : readFileSync(`${packageDir}/${first}`, 'utf8').trim();
 }
 
 function section(name) {

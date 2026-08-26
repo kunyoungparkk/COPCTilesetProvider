@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { importClosure } from './import-closure.js';
+import { importClosure, srcRelative } from './import-closure.js';
 
 const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 
@@ -66,7 +66,7 @@ describe('what src/index.ts can reach', () => {
 // to catch a violation.
 describe('nothing outside src/cesium-runtime/ imports cesium', () => {
   const files = listTsFiles(SRC).filter(
-    (file) => !relative(SRC, file).startsWith(`cesium-runtime${'/'}`),
+    (file) => !srcRelative(file).startsWith(`cesium-runtime${'/'}`),
   );
 
   it('checked at least one file outside cesium-runtime', () => {
@@ -77,7 +77,7 @@ describe('nothing outside src/cesium-runtime/ imports cesium', () => {
 
   it('names neither "cesium" nor "@cesium/engine" as an import specifier', () => {
     const offenders = files
-      .map((file) => relative(SRC, file))
+      .map(srcRelative)
       .filter((file) => importsCesium(readFileSync(join(SRC, file), 'utf8')));
     expect(offenders).toEqual([]);
   });

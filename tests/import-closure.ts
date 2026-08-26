@@ -5,6 +5,25 @@ import { fileURLToPath } from 'node:url';
 const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 
 /**
+ * `path.relative`, answered in the separator a module specifier actually uses.
+ *
+ * `path.relative` speaks the host's separator, so the same call returns
+ * `crs/transform.ts` on macOS and `crs\transform.ts` on Windows, while every
+ * caller here compares against a `/` literal — a module specifier is POSIX
+ * wherever it runs, and so are the names these tests asserted on.
+ *
+ * It is a named helper rather than a `.replaceAll` at each site because the
+ * unnormalised form does not fail loudly. `tests/cesium-boundary.test.ts`
+ * excludes `src/cesium-runtime/` from its "nothing imports cesium" sweep with
+ * a `startsWith('cesium-runtime/')`; on Windows that matched nothing, so the
+ * three files allowed to import Cesium were swept in and reported as
+ * violations of the rule they are the exception to. A guard that silently
+ * stops excluding is worse than one that throws, and the shape of that
+ * mistake is identical at all three call sites.
+ */
+export const srcRelative = (file: string): string => relative(SRC, file).replaceAll('\\', '/');
+
+/**
  * Thrown when the scanner meets a dynamic `import(...)` call whose argument
  * is not a single quoted string literal on its own — a template literal, a
  * bare identifier, a concatenation, or anything else JavaScript would have
@@ -582,8 +601,10 @@ export function importClosure(entry: string): string[] {
     const source = readFileSync(resolve(SRC, file), 'utf8');
     for (const specifier of findSpecifiers(source, file)) {
       // Written as the `.js` the browser will fetch; read as the `.ts` on disk.
-      const target = relative(SRC, resolve(dirname(resolve(SRC, file)), specifier))
-        .replace(/\.js$/, '.ts');
+      const target = srcRelative(resolve(dirname(resolve(SRC, file)), specifier)).replace(
+        /\.js$/,
+        '.ts',
+      );
       if (!target.startsWith('..')) {
         queue.push(target);
       }
