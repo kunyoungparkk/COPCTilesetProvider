@@ -7,6 +7,8 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-27
+
 ### Added
 
 - LAS point data record format 6 opens and renders. COPC allows formats 6, 7
@@ -92,7 +94,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/releases/tag/v0.1.0
