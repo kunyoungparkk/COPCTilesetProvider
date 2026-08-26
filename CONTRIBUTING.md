@@ -67,5 +67,18 @@ breaks; the way to know is to break it and watch.
    the source tree.
 5. Commit, then push a `v<version>` tag.
    [`.github/workflows/release.yml`](.github/workflows/release.yml) takes it
-   from there: typecheck, test, build, `npm publish --provenance`, and a
-   GitHub Release. It refuses a tag that disagrees with the manifest.
+   from there: typecheck, test, build, `npm publish`, and a GitHub Release. It
+   refuses a tag that disagrees with the manifest.
+
+Nothing in that workflow holds an npm credential. The registry trusts this
+repository's `release.yml` by name and accepts a short-lived OIDC assertion
+instead — npm's trusted publishing, which replaced the automation tokens it
+withdrew after the May 2026 account compromises. Two consequences worth
+knowing before you touch either end: **renaming this workflow file revokes the
+trust**, because the trusted publisher entry pins it by filename, and
+provenance is attached automatically, so `--provenance` is not passed and must
+not be re-added.
+
+0.1.0 through 0.3.0 were published by hand and carry no provenance
+attestation. 0.3.0 in particular was the first tag this workflow ever saw, and
+it failed at publish because the secret it wanted then had never existed.
