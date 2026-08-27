@@ -141,17 +141,14 @@ Each point carries these batch-table properties:
 | `ReturnNumber` | uint8 | LAS return number |
 | `NumberOfReturns` | uint8 | LAS number of returns |
 
+Unstyled, points take the file's own colour. LAS point format 6 carries none,
+so such a file renders in Cesium's constant dark grey until a style gives it a
+colour — every property above is still there to style on.
+
 Picking goes through Cesium's own `scene.pick`. Every point carries a
 `BATCH_ID`, which is what lets a picked point resolve to the properties above.
 
 ## Limits
-
-**Point formats 6, 7 and 8 — the three COPC allows.** Any other format is
-plain LAS or LAZ rather than COPC, and `fromUrl` refuses it with the format
-named and the conversion to run. Points take the file's own colour, which
-format 6 does not carry: those tiles render in Cesium's constant dark grey
-until a style gives them a colour. Every batch-table property above is still
-present, so [styling and picking](#styling-and-picking) work the same.
 
 **Heights are ellipsoidal.** Every Z is height above the WGS84 ellipsoid.
 Orthometric data — most surveyed LiDAR — sits at a visible vertical offset
