@@ -32,25 +32,23 @@ npm install copc-tileset-provider cesium
 ```
 
 `0.x` on purpose: every release is packed, installed into a throwaway project
-and rendered in headless Chromium, but nobody outside this repository has lived
-with the API yet, so it may still move. What moved, and what it means for code
-you have already written, is in [CHANGELOG.md](CHANGELOG.md) — behaviour
-changes are called out as such.
+and rendered in headless Chromium, but the API has had no users outside this
+repository yet, so it may still move. What moved is in
+[CHANGELOG.md](CHANGELOG.md), where behaviour changes are marked as such.
 
 Cesium is a peer dependency, `>=1.142.0 <1.145.0`. Both ends of that range are
 rendered in a real browser before it is widened.
 
 ## Quick start
 
-Register the file's coordinate system first, then open it. That order is not
-incidental — see [Coordinate systems](#coordinate-systems).
+Register the file's coordinate system before opening it — see
+[Coordinate systems](#coordinate-systems).
 
 ```js
 import { Viewer } from 'cesium';
 import { COPCTilesetProvider } from 'copc-tileset-provider';
 
 // EPSG:2992 — Oregon Statewide Lambert, the system Autzen is stored in.
-// Any system other than EPSG:4326 has to be registered once, before use.
 COPCTilesetProvider.registerCrs(
   2992,
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
@@ -67,15 +65,13 @@ viewer.scene.primitives.add(provider);
 viewer.camera.flyTo({ destination: provider.extent });
 ```
 
-That URL is real — the public Autzen stadium scan, 81 MB, streamed a few
-hundred kilobytes at a time. Paste the block and it renders.
+That URL is not a placeholder: it is the public Autzen scan, 81 MB, of which
+opening the file reads about 10 KB.
 
-`provider` is a Cesium primitive: `scene.primitives.add` takes it directly, and
-`provider.destroy()` releases the tileset, the Worker pool and every outstanding
-reservation.
+`provider` is a Cesium primitive — `scene.primitives.add` takes it directly.
 
-A complete, runnable example is in [`examples/`](examples/) — that is the
-demo above.
+A complete, runnable example is in [`examples/`](examples/); it is the
+screenshot at the top.
 
 ## Coordinate systems
 
@@ -108,25 +104,19 @@ what it is given.
 
 ## Your server has to support Range requests
 
-Every read is an HTTP Range request, and every response is verified: a `206`
-whose `Content-Range` matches what was asked for. **There is no fall back to
-downloading the whole file** — a fallback would quietly turn streaming into a
-full-file download, which is the thing this library exists to avoid.
+Every read is an HTTP Range request, and every response is verified.
 
-Two consequences worth checking before you file a bug:
-
-- **The host must serve `206`.** Most static hosts do. Some CDNs and proxies
-  strip Range support on compressed responses. A `200` is refused outright —
-  that is the whole file, and accepting it is the failure this rule exists to
-  prevent.
-- **Cross-origin, verification is one notch weaker, and that is expected.**
-  Browsers hand JavaScript only the CORS-safelisted response headers, and
-  `Content-Range` is not one of them unless the server sends
-  `Access-Control-Expose-Headers: Content-Range` — which no public COPC dataset
-  does. When the header is readable, the range is checked against it exactly.
-  When it is not, the response is accepted on its status and the exact length
-  of its body; what cannot then be confirmed is *which* bytes came back. Send
-  the header if you control the host and want the stronger check.
+- **The host must serve `206`.** Most static hosts do; some CDNs and proxies
+  strip Range support on compressed responses. A `200` is refused rather than
+  accepted as a fallback — it is the whole file, which is what streaming exists
+  to avoid.
+- **Cross-origin, the check is weaker.** Browsers hand JavaScript only the
+  CORS-safelisted response headers, and `Content-Range` is not one of them
+  unless the server sends `Access-Control-Expose-Headers: Content-Range` —
+  which no public COPC dataset does. With the header, the range is checked
+  against it exactly; without it, on the status and the exact length of the
+  body, which cannot confirm *which* bytes came back. Send the header if you
+  control the host and want the stronger check.
 
 ## Styling and picking
 
@@ -151,21 +141,17 @@ Each point carries these batch-table properties:
 | `ReturnNumber` | uint8 | LAS return number |
 | `NumberOfReturns` | uint8 | LAS number of returns |
 
-Picking goes through Cesium's own `scene.pick`. Every point is encoded with a
-`BATCH_ID`, which is what lets a picked point carry the properties above —
-without it Cesium builds no feature table and there is nothing to read.
+Picking goes through Cesium's own `scene.pick`. Every point carries a
+`BATCH_ID`, which is what lets a picked point resolve to the properties above.
 
 ## Limits
 
-Read this section before deciding whether the library fits.
-
 **Point formats 6, 7 and 8 — the three COPC allows.** Any other format is
-plain LAS or LAZ rather than COPC, whatever the file is named, and `fromUrl`
-refuses it with the format named and the conversion to run. Points take the
-file's own colour, which format 6 does not carry: those tiles arrive uncoloured
-and Cesium draws them in its constant dark grey until a style gives them a
-colour. Everything else is unaffected — the batch-table properties below are
-all present, so [styling and picking](#styling-and-picking) work the same.
+plain LAS or LAZ rather than COPC, and `fromUrl` refuses it with the format
+named and the conversion to run. Points take the file's own colour, which
+format 6 does not carry: those tiles render in Cesium's constant dark grey
+until a style gives them a colour. Every batch-table property above is still
+present, so [styling and picking](#styling-and-picking) work the same.
 
 **Heights are ellipsoidal.** Every Z is height above the WGS84 ellipsoid.
 Orthometric data — most surveyed LiDAR — sits at a visible vertical offset
@@ -184,9 +170,9 @@ it rather than omitting the option.
 
 **Content is PNTS, which is 3D Tiles 1.0 legacy**, superseded by glTF-based
 content in 3D Tiles 1.1. Chosen deliberately: a Worker can hand-encode PNTS — a
-header, a feature table, a binary body — far more simply than it can assemble
-glTF, and its batch table is what gives Cesium's style language and picking for
-free. glTF is on the roadmap after v1.
+header, a feature table, a binary body — where glTF has to be assembled, and
+its batch table is what gives Cesium's style language and picking. glTF is on
+the roadmap after v1.
 
 **The default Worker comes from a `blob:` URL**, built from a bundle inlined
 into the library so nothing has to be served or configured. A Content Security
