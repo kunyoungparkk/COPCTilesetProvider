@@ -171,10 +171,10 @@ header, a feature table, a binary body — where glTF has to be assembled, and
 its batch table is what gives Cesium's style language and picking. glTF is on
 the roadmap after v1.
 
-**The default Worker comes from a `blob:` URL**, built from a bundle inlined
-into the library so nothing has to be served or configured. A Content Security
-Policy forbidding `worker-src blob:` blocks it, and the library cannot work
-around that. Supply your own Worker instead:
+**A strict `worker-src` CSP blocks the default Worker.** It is built from a
+bundle inlined into the library and loaded from a `blob:` URL, so nothing has
+to be served or configured — but a policy that forbids `blob:` refuses it, and
+the library cannot work around that. Supply your own Worker instead:
 
 ```js
 // 1. Your own Worker module — the subpath installs itself when evaluated.
@@ -198,9 +198,6 @@ when its platform is `browser`, plain Rollup only with
 `@rollup/plugin-node-resolve` set to `{ browser: true }`. Otherwise alias
 `laz-perf` to `laz-perf/lib/web/index.js`. Only the Vite path is measured — the
 publish smoke builds with it.
-
-**Also out of scope for v1:** writing or editing COPC, plain LAS/LAZ files, an
-exact global point budget, WebGL 1, and 2D or Columbus View.
 
 Cesium 1.141 and earlier is not a choice: the `_runtimeContentCodec` slot this
 library installs onto arrived in 1.142, so on anything older the mechanism it
