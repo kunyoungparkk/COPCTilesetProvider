@@ -140,3 +140,59 @@ describe('planCoalescedReads', () => {
     expect(() => planCoalescedReads([{ offset: 0.5, length: 10 }])).toThrow(InvalidByteRangeError);
   });
 });
+
+// The gap and waste thresholds bound what a merge wastes; neither bounds how
+// large it gets. A COPC file writes its chunks back to back — measured, all 277
+// gaps in the pinned root page are zero — so a run of them merges at gap zero
+// and waste zero for as long as the run continues. Without a span limit that
+// run is the file's whole point region, and streaming becomes a download.
+describe('the span limit', () => {
+  /** Back-to-back ranges: no gap, no waste, so only size can stop the merge. */
+  const contiguous = (count: number, each: number) =>
+    Array.from({ length: count }, (_, index) => ({ offset: index * each, length: each }));
+
+  it('stops a run of adjacent ranges from growing past it', () => {
+    const groups = planCoalescedReads(contiguous(8, 1000), { maxSpanBytes: 2500 });
+
+    // Two per group: a third would make the span 3000, past the limit.
+    expect(groups.map((group) => group.span)).toEqual([
+      { offset: 0, length: 2000 },
+      { offset: 2000, length: 2000 },
+      { offset: 4000, length: 2000 },
+      { offset: 6000, length: 2000 },
+    ]);
+    expect(groups.flatMap((group) => group.slices.map((slice) => slice.index))).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7,
+    ]);
+  });
+
+  it('merges the same run without a limit low enough to bite', () => {
+    // Without this the test above would pass against a planner that never
+    // merged adjacent ranges at all.
+    const groups = planCoalescedReads(contiguous(8, 1000), { maxSpanBytes: 8000 });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.span).toEqual({ offset: 0, length: 8000 });
+  });
+
+  // The limit refuses to grow a span, not to read a range. A node bigger than
+  // the limit still has to be fetched — it is one tile's own chunk.
+  it('still reads a single range larger than the limit', () => {
+    const groups = planCoalescedReads([{ offset: 0, length: 9000 }], { maxSpanBytes: 2500 });
+
+    expect(groups).toEqual([
+      { span: { offset: 0, length: 9000 }, slices: [{ index: 0, offset: 0, length: 9000 }] },
+    ]);
+  });
+
+  // §7's own default, checked against the shape the pinned file actually has:
+  // ~190 KB chunks written end to end.
+  it('caps the default at 4 MiB, which is about twenty-two Autzen-sized chunks', () => {
+    const groups = planCoalescedReads(contiguous(40, 190_000));
+
+    expect(groups.length).toBeGreaterThan(1);
+    for (const group of groups) {
+      expect(group.span.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    }
+  });
+});

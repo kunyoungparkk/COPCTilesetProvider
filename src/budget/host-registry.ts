@@ -3,10 +3,9 @@ import { Counter } from './counter.js';
 /**
  * Host request slots: process-wide, keyed by origin.
  *
- * Module state on purpose. OVERVIEW §7's cap of 6 is sized against the
- * browser's per-host connection ceiling, which two providers reading the same
- * bucket genuinely share — unlike the other three budgets, this one belongs to
- * no single provider. A
+ * Module state on purpose. OVERVIEW §7's cap is sized against what one host
+ * will carry, which two providers reading the same bucket genuinely share —
+ * unlike the other three budgets, this one belongs to no single provider. A
  * provider's `destroy` releases only the slots that provider itself holds, by
  * walking its own outstanding leases; it never resets another provider's share
  * of an origin's counter.

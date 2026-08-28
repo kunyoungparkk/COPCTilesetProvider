@@ -7,6 +7,30 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-28
+
+The release that lets the streaming rate off its leash. 0.9.0 made merging
+real and 0.9.1 stopped it coupling a frame's reads together; this one raises
+the admission window they were both waiting on, and bounds the request size
+that raising it would otherwise have let grow without limit.
+
+### Changed
+
+- **Behaviour:** up to 18 tile reads per origin may now be in flight at once,
+  up from 6. The old value came from the HTTP/1.1 browser connection ceiling,
+  a premise CesiumJS itself no longer holds to: its own
+  `RequestScheduler.maximumRequestsPerServer` defaults to 18, and its docs put
+  HTTP/1 at "6–8" against "an unlimited amount of connections for HTTP/2" —
+  which is what a COPC file is served over in practice. Measured on the pinned
+  file, this is what the streaming rate was actually waiting on: the round-trip
+  waves a full load takes drop from 44 to 13.
+- **Behaviour:** a merged Range request will not grow past 4 MiB. Nothing
+  bounded its size before, and nothing else can: COPC writes its chunks back to
+  back, so a run of them merges at a gap of zero and a waste ratio of zero for
+  as long as the run continues — on the pinned file, that is the whole 81 MB
+  point region as one request. A single node larger than the limit is still
+  read; the limit refuses to grow a span, not to fetch a range.
+
 ## [0.9.1] — 2026-08-28
 
 ### Fixed
@@ -170,7 +194,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...v0.9.0
 [0.3.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.2.0...v0.3.0

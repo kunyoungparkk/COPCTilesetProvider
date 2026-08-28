@@ -6,7 +6,7 @@ import { createLease, type Lease, type OutstandingLease } from './lease.js';
 // update to that table.
 const DEFAULT_RANGE_BODY_BYTES = 32 * 1024 * 1024;
 const DEFAULT_DECODE_JOBS = 8; // worker pool of 4, times 2
-const DEFAULT_HOST_REQUESTS_PER_ORIGIN = 6;
+const DEFAULT_HOST_REQUESTS_PER_ORIGIN = 18;
 
 /**
  * Why an acquisition was rejected outright rather than deferred.

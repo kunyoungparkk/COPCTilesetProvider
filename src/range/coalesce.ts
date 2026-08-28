@@ -7,12 +7,27 @@ import type { ByteRange } from './content-range.js';
 // observable Range server and an update to that table.
 const DEFAULT_MAX_GAP_BYTES = 256 * 1024;
 const DEFAULT_MAX_WASTE_RATIO = 0.02;
+const DEFAULT_MAX_SPAN_BYTES = 4 * 1024 * 1024;
 
 export interface CoalesceOptions {
   /** Largest gap between two ranges that may still be read as one. Defaults to 256 KiB. */
   readonly maxGapBytes?: number;
   /** Largest share of a merged span that may be bytes nobody asked for. Defaults to 0.02. */
   readonly maxWasteRatio?: number;
+  /**
+   * Largest request a merge may grow into. Defaults to 4 MiB (§7).
+   *
+   * The other two thresholds bound what merging *wastes*, and neither bounds
+   * how large it gets: a COPC file writes its chunks back to back, so a run of
+   * them merges with a gap of zero and a waste ratio of zero however long the
+   * run is. What stops it is this, and nothing else — measured on the pinned
+   * file, all 277 gaps between its chunks are zero, so the whole 81 MB point
+   * region is one legal merge as far as gap and waste are concerned.
+   *
+   * A single range larger than this is still read: the limit refuses to *grow*
+   * a span past it, so an oversized range simply forms a group of its own.
+   */
+  readonly maxSpanBytes?: number;
 }
 
 /** Where one caller's bytes sit inside the span that was actually read. */
@@ -46,6 +61,7 @@ export function planCoalescedReads(
 ): readonly CoalescedGroup[] {
   const maxGapBytes = options.maxGapBytes ?? DEFAULT_MAX_GAP_BYTES;
   const maxWasteRatio = options.maxWasteRatio ?? DEFAULT_MAX_WASTE_RATIO;
+  const maxSpanBytes = options.maxSpanBytes ?? DEFAULT_MAX_SPAN_BYTES;
 
   const ordered = requests
     .map((range, index) => {
@@ -104,8 +120,11 @@ export function planCoalescedReads(
     const gap = range.offset - end;
 
     // Compared as a product rather than a ratio, so no division rounds a
-    // borderline span the wrong way.
-    if (gap > maxGapBytes || mergedWaste > mergedLength * maxWasteRatio) {
+    // borderline span the wrong way. The span limit joins them because neither
+    // of the other two bounds size: back-to-back chunks merge at gap zero and
+    // waste zero for as long as the run continues, which on a real COPC file
+    // is the whole point region.
+    if (gap > maxGapBytes || mergedWaste > mergedLength * maxWasteRatio || mergedLength > maxSpanBytes) {
       flush();
       start = range.offset;
       end = rangeEnd;

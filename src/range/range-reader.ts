@@ -88,6 +88,8 @@ export interface RangeReaderOptions {
   readonly maxGapBytes?: number;
   /** Largest share of a merged span that may be bytes nobody asked for. Defaults to 0.02 (§7). */
   readonly maxWasteRatio?: number;
+  /** Largest request a merge may grow into. Defaults to 4 MiB (§7). */
+  readonly maxSpanBytes?: number;
 }
 
 export interface RangeRead {
@@ -178,6 +180,7 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
   const coalesceOptions = {
     ...(options.maxGapBytes !== undefined && { maxGapBytes: options.maxGapBytes }),
     ...(options.maxWasteRatio !== undefined && { maxWasteRatio: options.maxWasteRatio }),
+    ...(options.maxSpanBytes !== undefined && { maxSpanBytes: options.maxSpanBytes }),
   };
 
   // §7 tunes the merge thresholds against measured request counts and waste, so
