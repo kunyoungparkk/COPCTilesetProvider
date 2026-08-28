@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
+import { fixtureBytes } from './fixtures.js';
 import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import {
@@ -13,12 +12,8 @@ import {
 const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
-const autzenHeader = (): Pick<Las.Header, 'min' | 'max'> => {
-  const bytes = new Uint8Array(
-    readFileSync(fileURLToPath(new URL('../fixtures/autzen-head.bin', import.meta.url))),
-  );
-  return Las.Header.parse(bytes.subarray(0, 375));
-};
+const autzenHeader = (): Pick<Las.Header, 'min' | 'max'> =>
+  Las.Header.parse(fixtureBytes('autzen-head.bin').subarray(0, 375));
 
 describe('measureRootGeometricError', () => {
   it('divides the largest measured metre span by sixteen', async () => {

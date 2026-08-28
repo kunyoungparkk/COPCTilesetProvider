@@ -1,39 +1,29 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
-import type { ByteRange, RangeReader } from '../src/range/index.js';
+import type { RangeReader } from '../src/range/index.js';
+import type { RecordingReader } from './fake-reader.js';
+import { bufferReader } from './fake-reader.js';
+import { FILE_URL, fixtureBytes, TOTAL_BYTES } from './fixtures.js';
 
-const AUTZEN = new Uint8Array(
-  readFileSync(fileURLToPath(new URL('../fixtures/autzen-head.bin', import.meta.url))),
-);
-const URL_ = 'https://host/autzen.copc.laz';
+const AUTZEN = fixtureBytes('autzen-head.bin');
 
-/** A reader that serves one buffer and records what was asked for. */
-function bufferReader(bytes: Uint8Array, totalBytes: number | null = 81_123_042) {
-  const reads: ByteRange[] = [];
-  const reader: RangeReader = {
-    url: URL_,
-    read: (range) => {
-      reads.push(range);
-      return Promise.resolve({
-        bytes: bytes.slice(range.offset, range.offset + range.length).buffer as ArrayBuffer,
-        totalBytes,
-      });
-    },
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-  return { reader, reads };
-}
+/**
+ * The shared buffer reader with this file's own default for the size a 206
+ * discloses: every test here wants a real number except the one about a server
+ * that discloses none.
+ */
+const headerReader = (
+  bytes: Uint8Array,
+  totalBytes: number | null = TOTAL_BYTES,
+): RecordingReader => bufferReader(bytes, { totalBytes });
 
 describe('readFileHeader', () => {
   it('reads the header and the info VLR in the one range Decision 4 specifies', async () => {
-    const { reader, reads } = bufferReader(AUTZEN);
+    const reader = headerReader(AUTZEN);
 
     const result = await readFileHeader(reader);
 
-    expect(reads).toEqual([{ offset: 0, length: 589 }]);
+    expect(reader.reads).toEqual([{ offset: 0, length: 589 }]);
     expect(result.header.headerLength).toBe(375);
     expect(result.header.pointDataOffset).toBe(1736);
     expect(result.header.pointCount).toBe(10_653_336);
@@ -41,7 +31,7 @@ describe('readFileHeader', () => {
   });
 
   it('parses the COPC info that sits at the fixed offset', async () => {
-    const { reader } = bufferReader(AUTZEN);
+    const reader = headerReader(AUTZEN);
 
     const { info } = await readFileHeader(reader);
 
@@ -52,7 +42,7 @@ describe('readFileHeader', () => {
   it('rejects a file that is not LAS at all', async () => {
     const notLas = new Uint8Array(AUTZEN);
     notLas.set(new TextEncoder().encode('JUNK'), 0);
-    const { reader } = bufferReader(notLas);
+    const reader = headerReader(notLas);
 
     await expect(readFileHeader(reader)).rejects.toMatchObject({ code: 'not-copc' });
   });
@@ -63,7 +53,7 @@ describe('readFileHeader', () => {
   it('rejects a header whose length is not 375', async () => {
     const shortHeader = new Uint8Array(AUTZEN);
     new DataView(shortHeader.buffer).setUint16(94, 227, true); // headerLength field
-    const { reader } = bufferReader(shortHeader);
+    const reader = headerReader(shortHeader);
 
     await expect(readFileHeader(reader)).rejects.toMatchObject({
       code: 'unsupported-header-layout',
@@ -74,7 +64,7 @@ describe('readFileHeader', () => {
   it('rejects a LAS file with no COPC info VLR where the format requires one', async () => {
     const noInfo = new Uint8Array(AUTZEN);
     noInfo.set(new TextEncoder().encode('other'), 375 + 2); // the VLR's userId field
-    const { reader } = bufferReader(noInfo);
+    const reader = headerReader(noInfo);
 
     await expect(readFileHeader(reader)).rejects.toMatchObject({ code: 'not-copc' });
   });
@@ -86,7 +76,7 @@ describe('readFileHeader', () => {
   it('rejects a copc/1 record whose content is not the 160-byte info payload', async () => {
     const wrongLength = new Uint8Array(AUTZEN);
     new DataView(wrongLength.buffer).setUint16(375 + 20, 96, true); // contentLength field
-    const { reader } = bufferReader(wrongLength);
+    const reader = headerReader(wrongLength);
 
     const failure = readFileHeader(reader);
 
@@ -101,7 +91,7 @@ describe('readFileHeader', () => {
   it('rejects an info record whose root hierarchy page cannot be read', async () => {
     const hugePage = new Uint8Array(AUTZEN);
     hugePage.fill(0xff, 429 + 40, 429 + 48); // rootHierarchyPage.pageOffset
-    const { reader } = bufferReader(hugePage);
+    const reader = headerReader(hugePage);
 
     const error = await readFileHeader(reader).then(
       () => undefined,
@@ -118,7 +108,7 @@ describe('readFileHeader', () => {
   it('passes an abort signal straight through to the reader', async () => {
     const controller = new AbortController();
     const read = vi.fn().mockRejectedValue(new Error('should not resolve'));
-    const reader: RangeReader = { url: URL_, read, readMany: vi.fn(), stats: vi.fn() };
+    const reader: RangeReader = { url: FILE_URL, read, readMany: vi.fn(), stats: vi.fn() };
 
     await expect(readFileHeader(reader, controller.signal)).rejects.toThrow();
     expect(read).toHaveBeenCalledWith({ offset: 0, length: 589 }, controller.signal);

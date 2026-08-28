@@ -1,34 +1,16 @@
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
 import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { createTransformFromDefinition } from '../src/crs/worker.js';
+import type { CrsTransform } from '../src/crs/worker.js';
 import { ZeroPointChunkError } from '../src/errors/index.js';
-import type { ByteRange, RangeReader } from '../src/range/index.js';
 import type { DecodeHeader } from '../src/worker/decode.js';
 import { encodeNode } from '../src/worker/pipeline.js';
 import { autzenWkt } from './autzen-wkt.js';
-
-const fixture = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
-const URL_ = 'https://host/autzen.copc.laz';
-
-/** A reader that serves one fixed buffer, regardless of the range asked for. */
-function bufferReader(bytes: Uint8Array): RangeReader {
-  return {
-    url: URL_,
-    read: (range: ByteRange) =>
-      Promise.resolve({
-        bytes: bytes.slice(range.offset, range.offset + range.length).buffer as ArrayBuffer,
-        totalBytes: null,
-      }),
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-}
+import { bufferReader } from './fake-reader.js';
+import { fixtureBytes as fixture } from './fixtures.js';
 
 // Same proj4 definition tests/crs-transform.test.ts, tests/worker-positions.test.ts,
 // and tests/worker-pnts.test.ts register for EPSG:2992 — Autzen's own
@@ -76,6 +58,7 @@ describe('encodeNode', () => {
   let header: DecodeHeader;
   let compressed: Uint8Array;
   let pointCount: number;
+  let transform: CrsTransform;
   let definition: string;
 
   beforeAll(async () => {
@@ -100,10 +83,11 @@ describe('encodeNode', () => {
 
     registerCrs(2992, OREGON);
     definition = resolveCrsDefinition(await autzenWkt());
+    transform = createTransformFromDefinition(definition);
   });
 
   it('goes end to end: the real chunk produces a buffer PntsParser reads back as 47 points', async () => {
-    const buffer = await encodeNode({ compressed, header, pointCount, definition });
+    const buffer = await encodeNode({ compressed, header, pointCount, transform });
 
     const { default: PntsParser } = await importEngineModule<{
       default: { parse: (buffer: ArrayBuffer) => { pointsLength: number } };
@@ -114,18 +98,17 @@ describe('encodeNode', () => {
 
   it('raises a typed error rather than producing a buffer for a zero-point chunk', async () => {
     await expect(
-      encodeNode({ compressed: new Uint8Array(0), header, pointCount: 0, definition }),
+      encodeNode({ compressed: new Uint8Array(0), header, pointCount: 0, transform }),
     ).rejects.toBeInstanceOf(ZeroPointChunkError);
   });
 
   it('carries the geoid height into the positions it encodes', async () => {
-    const plain = await encodeNode({ compressed, header, pointCount, definition });
+    const plain = await encodeNode({ compressed, header, pointCount, transform });
     const lowered = await encodeNode({
       compressed,
       header,
       pointCount,
-      definition,
-      geoidHeight: -23.333,
+      transform: createTransformFromDefinition(definition, -23.333),
     });
 
     // PNTS RTC_CENTER is the midpoint of the transformed points' ECEF box, so a

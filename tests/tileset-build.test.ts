@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Info } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
+import { bufferReader } from './fake-reader.js';
+import { fixtureBytes } from './fixtures.js';
 import { hierarchyPageOf } from './hierarchy-page.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
 import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
@@ -18,12 +18,7 @@ const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
 
 const DEGREES = 180 / Math.PI;
 
-const autzenCube = () =>
-  Info.parse(
-    new Uint8Array(
-      readFileSync(fileURLToPath(new URL('../fixtures/autzen-head.bin', import.meta.url))),
-    ).subarray(429, 429 + 160),
-  ).cube;
+const autzenCube = () => Info.parse(fixtureBytes('autzen-head.bin').subarray(429, 429 + 160)).cube;
 
 const contextFor = async (transform: CrsTransform) => ({
   url: 'https://host/constructed.copc.laz',
@@ -149,17 +144,9 @@ describe('buildTileset', () => {
 
   it('keeps every child region inside its parent, on the real page', async () => {
     const transform = await transformFor();
-    const bytes = new Uint8Array(
-      readFileSync(fileURLToPath(new URL('../fixtures/autzen-root-hierarchy.bin', import.meta.url))),
-    );
-    const reader = {
-      url: 'https://host/autzen.copc.laz',
-      read: () => Promise.resolve({ bytes: bytes.buffer.slice(0), totalBytes: null }),
-      readMany: () => Promise.reject(new Error('unused')),
-      stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-    };
+    const bytes = fixtureBytes('autzen-root-hierarchy.bin');
     const page = await readHierarchyPage(
-      reader,
+      bufferReader(bytes),
       { offset: 0, length: bytes.byteLength },
       // Above every constructed entry below; this test is not about the bound.
       1_000_000,

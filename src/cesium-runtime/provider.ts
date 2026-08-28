@@ -8,7 +8,7 @@ import { findVerticalEpsgCode, registerCrs, resolveCrsDefinition } from '../crs/
 import type { CrsTransform } from '../crs/index.js';
 import { createTransformFromDefinition } from '../crs/worker.js';
 import { InvalidSourceUrlError, InvalidTokenBaseError } from '../errors/index.js';
-import { createRangeReader } from '../range/index.js';
+import { createCoalescingReader, createRangeReader } from '../range/index.js';
 import type { RangeReader, RangeStats } from '../range/index.js';
 import { buildTileset, measureRootGeometricError } from '../tileset/index.js';
 import type { TileEntry, TilesetContext } from '../tileset/index.js';
@@ -406,7 +406,15 @@ export class COPCTilesetProvider {
     const hierarchyPagesExpanded = { count: 0 };
 
     const interceptContext: InterceptContext = {
-      reader,
+      // Decision 4's merge, and the only place it is switched on. The three
+      // reads `openCopc` made above deliberately went to the bare `reader`:
+      // they are sequenced by what each one discovers, and 81 MB apart in
+      // this file's own layout, so there is nothing for a merge to join.
+      // Tile reads are the opposite — a frame's worth of them arrive together
+      // and address chunks the file wrote next to each other — which is what
+      // `createCoalescingReader` collects. `stats()` still reads `reader`'s
+      // own counters, since the wrapper keeps none of its own.
+      reader: createCoalescingReader(reader),
       budget,
       entries,
       tokenBase,

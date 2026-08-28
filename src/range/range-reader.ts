@@ -7,7 +7,7 @@ import {
   RangeTimeoutError,
   RangeUnsupportedError,
 } from '../errors/index.js';
-import { planCoalescedReads } from './coalesce.js';
+import { planCoalescedReads, type CoalescedGroup } from './coalesce.js';
 import { formatRangeHeader, parseContentRange, type ByteRange } from './content-range.js';
 
 // Defaults come from OVERVIEW §7. Changing them requires a measurement and an
@@ -134,10 +134,16 @@ export interface RangeReader {
   /**
    * Reads several ranges, merging neighbours into shared requests.
    *
-   * Returns one buffer per request, in the caller's order, whatever grouping
-   * the planner chose.
+   * One settled result per request, in the caller's order, whatever grouping
+   * the planner chose. **Never rejects**: a request's outcome is its own
+   * group's, and the grouping is this method's decision rather than the
+   * caller's, so one group's failure must not be reported as every caller's.
+   * A caller that wants all-or-nothing gets it by inspecting the results.
    */
-  readMany(requests: readonly ByteRange[], signal?: AbortSignal): Promise<ArrayBuffer[]>;
+  readMany(
+    requests: readonly ByteRange[],
+    signal?: AbortSignal,
+  ): Promise<readonly PromiseSettledResult<ArrayBuffer>[]>;
   /** A snapshot of the counters accumulated since this reader was created. */
   stats(): RangeStats;
 }
@@ -329,12 +335,41 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     }
   }
 
+  /**
+   * One group per request, merging nothing — the plan for a batch the planner
+   * would not plan.
+   *
+   * `planCoalescedReads` refuses input it cannot merge soundly: a range that
+   * is not a whole number of bytes, and two ranges that overlap, which in a
+   * COPC file means a hierarchy whose chunks disagree about where a node's
+   * bytes are. That is a reason not to *merge* those ranges — merging them
+   * would hand two callers wrong slices — and not a reason not to read them.
+   * Read separately they are ordinary requests, each proving itself the usual
+   * way, and each failing alone: a malformed range dies in
+   * `formatRangeHeader` as its own caller's `InvalidByteRangeError`, and an
+   * overlap surfaces where it did before merging existed, as a chunk that
+   * fails to decode. Refusing the whole batch instead would take out every
+   * unrelated tile that happened to be requested in the same frame.
+   */
+  function unmerged(requests: readonly ByteRange[]): readonly CoalescedGroup[] {
+    return requests.map((range, index) => ({
+      span: range,
+      slices: [{ index, offset: 0, length: range.length }],
+    }));
+  }
+
   async function readMany(
     requests: readonly ByteRange[],
     signal?: AbortSignal,
-  ): Promise<ArrayBuffer[]> {
-    const groups = planCoalescedReads(requests, coalesceOptions);
-    const results: ArrayBuffer[] = new Array<ArrayBuffer>(requests.length);
+  ): Promise<readonly PromiseSettledResult<ArrayBuffer>[]> {
+    let groups: readonly CoalescedGroup[];
+    try {
+      groups = planCoalescedReads(requests, coalesceOptions);
+    } catch {
+      groups = unmerged(requests);
+    }
+
+    const results = new Array<PromiseSettledResult<ArrayBuffer>>(requests.length);
 
     // Groups run concurrently on purpose. Coalescing exists to remove round
     // trips, and serialising what is left would give the latency back. Bounding
@@ -343,12 +378,46 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     await Promise.all(
       groups.map(async (group) => {
         const wantedBytes = group.slices.reduce((total, slice) => total + slice.length, 0);
-        const { bytes } = await read(group.span, signal, wantedBytes);
-        // Counted here rather than when the group was planned: a merge whose
-        // request never went out, or never came back, saved no round trip.
-        counters.requestsSaved += group.slices.length - 1;
-        for (const slice of group.slices) {
-          results[slice.index] = bytes.slice(slice.offset, slice.offset + slice.length);
+        try {
+          const { bytes } = await read(group.span, signal, wantedBytes);
+          // Counted here rather than when the group was planned: a merge whose
+          // request never went out, or never came back, saved no round trip.
+          counters.requestsSaved += group.slices.length - 1;
+
+          const only = group.slices.length === 1 ? group.slices[0] : undefined;
+          if (only !== undefined && only.offset === 0 && only.length === bytes.byteLength) {
+            // A group of one covering its whole span merged with nothing, and
+            // this response holds exactly what its single caller asked for.
+            // Slicing it would allocate and copy the chunk a second time for
+            // no one — and every tile read on a frame where nothing merged
+            // takes this path, so that copy would be the common case rather
+            // than the exception. Handing the buffer over is safe because
+            // nothing else holds it: it comes from this response alone, and
+            // goes to one caller, which is free to transfer it to a Worker.
+            results[only.index] = { status: 'fulfilled', value: bytes };
+          } else {
+            // A merged span, where each caller must get a buffer of its own:
+            // they are handed to different tiles, and transferring one to a
+            // Worker detaches it — which would take the others' bytes with it
+            // if they were views on one buffer.
+            for (const slice of group.slices) {
+              results[slice.index] = {
+                status: 'fulfilled',
+                value: bytes.slice(slice.offset, slice.offset + slice.length),
+              };
+            }
+          }
+        } catch (reason: unknown) {
+          // This group's callers, and nobody else's. A frame's reads routinely
+          // plan into several groups — a hierarchy page sits megabytes from
+          // any point chunk — so `Promise.all`'s all-or-nothing rejection
+          // would report one request's timeout as every request's failure.
+          // For a tile that costs everything: Cesium marks a failed tile
+          // FAILED, which `requestContent` never revisits, so a tile whose own
+          // bytes arrived would be blank until the page is reloaded.
+          for (const slice of group.slices) {
+            results[slice.index] = { status: 'rejected', reason };
+          }
         }
       }),
     );

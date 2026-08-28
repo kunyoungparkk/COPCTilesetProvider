@@ -201,10 +201,11 @@ export function parseHierarchyPage(
  *
  * The read goes through the reader rather than `Hierarchy.load` so that
  * merging stays the transport's job rather than this module's (Decision 4).
- * Actually coalescing two pages into one request needs `readMany` and a way to
- * hand the resulting buffers back in, and neither exists yet: every read on a
- * production path is one `read()` for one range, so `readMany` has no caller
- * outside `src/range/` and no two pages are ever merged.
+ * Whether this particular read is merged with anything is therefore decided by
+ * which reader the caller passed: `createCoalescingReader` merges reads issued
+ * in one tick, and `openCopc` deliberately does not use it — a page's own byte
+ * range is only known from the read before it, so there is never a second read
+ * in flight to merge with.
  *
  * `filePointCount` is the file header's own point count, and it is required
  * rather than optional on purpose: an optional bound defaults to no bound, and

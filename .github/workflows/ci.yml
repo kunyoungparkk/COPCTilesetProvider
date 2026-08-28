@@ -25,10 +25,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          # Not `.nvmrc`: that file states the floor contributors install,
-          # while CI should also see the newest 22.x a user might have.
+          # Not `.nvmrc`: that file pins the exact floor contributors install,
+          # while CI should also see the newest 24.x a user might have.
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # On both hosts for the same reason the rest of this job is: the build
+      # runs shell commands and touches the filesystem, and the two platforms
+      # disagree about both. It reads only node_modules and writes only dist/,
+      # so it stays inside CLAUDE.md's no-network rule.
+      - run: npm run build

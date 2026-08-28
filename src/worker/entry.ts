@@ -1,4 +1,5 @@
 import { createTransformFromDefinition } from '../crs/worker.js';
+import type { CrsTransform } from '../crs/worker.js';
 import { toWire } from '../errors/index.js';
 import { encodeNode } from './index.js';
 import type { FromWorker, ToWorker } from './protocol.js';
@@ -17,22 +18,24 @@ import type { FromWorker, ToWorker } from './protocol.js';
 export function createWorkerHandler(
   post: (message: FromWorker, transfer: readonly ArrayBuffer[]) => void,
 ): (message: ToWorker) => Promise<void> {
-  let definition: string | undefined;
-  let geoidHeight: number | undefined;
+  // The one transform this Worker will ever build. `init` carries the
+  // definition and the geoid height once and nothing may change them
+  // afterwards (`WorkerPoolOptions` fixes both for the pool's whole life), so
+  // every chunk projects through this same object.
+  //
+  // Building it here is also what proves the definition is usable in this
+  // realm before any tile depends on it: `createTransformFromDefinition`
+  // refuses a `+nadgrids` table or a `proj4.defs` alias, neither of which a
+  // Worker can resolve. Assigned only when that succeeds, so a failed init
+  // leaves this `undefined` and the guard below refuses every later encode —
+  // the invariant is held by this variable rather than by a second throw
+  // deeper in the pipeline.
+  let transform: CrsTransform | undefined;
 
   return async (message) => {
     if (message.kind === 'init') {
-      // Building a transform here is what proves the definition is usable in
-      // this realm before any tile depends on it: `createTransformFromDefinition`
-      // refuses a `+nadgrids` table or a `proj4.defs` alias, neither of which
-      // a Worker can resolve.
       try {
-        // The result is discarded: `encodeNode` builds its own per call, and
-        // §7 takes an optimisation from measurement rather than from
-        // reasoning. What this call is for is the throw.
-        createTransformFromDefinition(message.definition, message.geoidHeight);
-        definition = message.definition;
-        geoidHeight = message.geoidHeight;
+        transform = createTransformFromDefinition(message.definition, message.geoidHeight);
         post({ kind: 'ready', id: message.id }, []);
       } catch (thrown) {
         post({ kind: 'failed', id: message.id, error: toWire(thrown) }, []);
@@ -40,7 +43,7 @@ export function createWorkerHandler(
       return;
     }
 
-    if (definition === undefined) {
+    if (transform === undefined) {
       post(
         {
           kind: 'failed',
@@ -57,8 +60,7 @@ export function createWorkerHandler(
         compressed: new Uint8Array(message.compressed),
         header: message.header,
         pointCount: message.pointCount,
-        definition,
-        ...(geoidHeight !== undefined && { geoidHeight }),
+        transform,
       });
       post({ kind: 'done', id: message.id, pnts }, [pnts]);
     } catch (thrown) {

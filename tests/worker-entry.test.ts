@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { describe, expect, it, vi } from 'vitest';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
@@ -11,12 +9,10 @@ import { decodeChunk } from '../src/worker/decode.js';
 import { encodePnts } from '../src/worker/pnts.js';
 import { toRelativePositions } from '../src/worker/positions.js';
 import type { FromWorker } from '../src/worker/protocol.js';
-import type { ByteRange, RangeReader } from '../src/range/index.js';
 import { autzenWkt } from './autzen-wkt.js';
+import { bufferReader } from './fake-reader.js';
+import { fixtureBytes as fixture } from './fixtures.js';
 import { createNodeWorkerPort } from './worker-port-node.js';
-
-const fixture = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
 
 // A call-through mock: records the exact buffer `encodePnts` returns, before
 // entry.ts (or anything downstream) has any chance to copy it. This is the
@@ -41,22 +37,6 @@ vi.mock('../src/worker/pnts.js', async (importOriginal) => {
     },
   };
 });
-
-const URL_ = 'https://host/autzen.copc.laz';
-
-/** A reader that serves one fixed buffer, regardless of the range asked for. */
-function bufferReader(bytes: Uint8Array): RangeReader {
-  return {
-    url: URL_,
-    read: (range: ByteRange) =>
-      Promise.resolve({
-        bytes: bytes.slice(range.offset, range.offset + range.length).buffer as ArrayBuffer,
-        totalBytes: null,
-      }),
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-}
 
 // Same proj4 definition tests/crs-transform.test.ts, tests/worker-positions.test.ts,
 // tests/worker-pnts.test.ts, and tests/worker-pipeline.test.ts register for
@@ -133,14 +113,12 @@ describe('createWorkerHandler', () => {
 
     // A failed init must not leave the handler usable: an encode that follows
     // has to be refused the same way one sent before any init would be.
-    // Measured, storing `definition` before probing it does let this encode
-    // reach `encodeNode` with the bad definition — but the reply still comes
-    // out `failed`, because `encodeNode` calls `createTransformFromDefinition`
-    // again itself and that throws a second time. This assertion does not
-    // catch that particular reordering today; it guards the invariant
-    // directly (a failed init's definition must never produce a successful
-    // encode) so it would still catch a future change that removed
-    // `encodeNode`'s own revalidation and left this guard as the only one.
+    // `entry.ts` holds that structurally — the transform is assigned only when
+    // `createTransformFromDefinition` returns, so a failed init leaves it
+    // `undefined` and the encode below never reaches `encodeNode` at all.
+    // This assertion is what catches an edit that assigned it before probing
+    // it: there is no second throw further down the pipeline to fall back on
+    // any more, since `encodeNode` no longer builds a transform of its own.
     await handler({
       kind: 'encode',
       id: 2,

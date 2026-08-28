@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { Cesium3DTileset, Rectangle } from 'cesium';
 import type { Resource } from 'cesium';
@@ -13,12 +11,9 @@ import * as crsWorkerModule from '../src/crs/worker.js';
 import * as poolModule from '../src/worker/pool.js';
 import type { WorkerPort } from '../src/worker/pool.js';
 import { autzenWkt } from './autzen-wkt.js';
+import { FILE_URL, fixtureBytes, fixtureFetch, TOTAL_BYTES } from './fixtures.js';
 
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
-const FILE_URL = 'https://host/autzen.copc.laz';
-const TOTAL_BYTES = 81_123_042;
+const load = fixtureBytes;
 
 // Same proj4 definition every other suite registers for Autzen's own
 // horizontal system (EPSG:2992, international feet) — `tests/crs-transform.test.ts`,
@@ -66,39 +61,6 @@ function vlrsWithWkt(content: string): Uint8Array {
   region.fill(0, contentStart, contentStart + WKT_CONTENT_LENGTH);
   region.set(bytes, contentStart);
   return region;
-}
-
-/** Serves a fixed set of byte ranges as 206 responses, and refuses anything else. */
-function fixtureFetch(slices: readonly { offset: number; bytes: Uint8Array }[]) {
-  const ranges: string[] = [];
-  const fetch = ((_input: unknown, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
-    const range = headers.get('range');
-    ranges.push(range ?? '(none)');
-    const match = range === null ? null : /^bytes=(\d+)-(\d+)$/.exec(range);
-    if (match?.[1] === undefined || match[2] === undefined) {
-      throw new Error(`expected a byte range header, got ${String(range)}`);
-    }
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const length = end - start + 1;
-    const slice = slices.find(
-      (candidate) =>
-        start >= candidate.offset && start + length <= candidate.offset + candidate.bytes.length,
-    );
-    if (slice === undefined) {
-      throw new Error(`no fixture slice covers bytes ${start}-${end}`);
-    }
-    const from = start - slice.offset;
-    const body = slice.bytes.slice(from, from + length);
-    return Promise.resolve(
-      new Response(body, {
-        status: 206,
-        headers: { 'content-range': `bytes ${start}-${end}/${TOTAL_BYTES}` },
-      }),
-    );
-  }) as unknown as typeof globalThis.fetch;
-  return { fetch, ranges };
 }
 
 const autzenFetch = () =>
@@ -285,6 +247,94 @@ describe('COPCTilesetProvider.fromUrl', () => {
     expect(stats.range.requests).toBe(4);
     expect(stats.budget.rangeBody.admitted).toBe(1);
     expect(stats.budget.hostRequests.admitted).toBe(1);
+  });
+
+  // Decision 4's merge, proven where it actually has to happen: through the
+  // provider's own interception, not against a reader a test constructed.
+  // `tests/range-coalescing-reader.test.ts` covers the merging itself; what
+  // this pins is that `fromUrl` puts a coalescing reader on the tile path at
+  // all — measured by mutation, handing `InterceptContext` the bare reader
+  // instead breaks nothing else in this suite.
+  it('merges two tiles requested in one tick into a single Range request', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const { fetch, ranges } = fixtureFetch([
+      { offset: 0, bytes: HEAD },
+      { offset: 375, bytes: VLRS },
+      { offset: 81_114_146, bytes: ROOT_HIERARCHY },
+      // The two chunks this fixture's root page places first in the file,
+      // back to back with no gap (keys 4-2-0-0 and 4-0-2-0).
+      { offset: 1744, bytes: new Uint8Array(192_613 + 157_238) },
+    ]);
+
+    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
+    try {
+      // Built the way Cesium builds a tile's content resource — derived from
+      // the tileset's own — so both reads go through the one interception
+      // path a real traversal uses.
+      const base = contentResourceOf(provider.tileset.root) as Resource;
+      const tokenBase = base.url.slice(0, -'n/0-0-0-0'.length);
+      const first = base.getDerivedResource({ url: `${tokenBase}n/4-2-0-0` });
+      const second = base.getDerivedResource({ url: `${tokenBase}n/4-0-2-0` });
+
+      // Same tick, which is what Cesium's own `requestTiles` loop does.
+      const [a, b] = await Promise.all([first.fetchArrayBuffer(), second.fetchArrayBuffer()]);
+
+      expect(a?.byteLength).toBe(192_613);
+      expect(b?.byteLength).toBe(157_238);
+      // Four requests, not five: the two tiles arrived as one merged read.
+      expect(ranges).toEqual([
+        'bytes=0-588',
+        'bytes=375-1735',
+        'bytes=81114146-81123041',
+        'bytes=1744-351594',
+      ]);
+      expect(provider.stats().range.requestsSaved).toBe(1);
+    } finally {
+      provider.destroy();
+    }
+  });
+
+  // The same isolation as `tests/range-reader.test.ts`'s group test, pinned
+  // where the consequence lives: a tile Cesium fails goes to FAILED, which
+  // `requestContent` never revisits, so a tile whose own bytes arrived must
+  // never inherit a neighbour's failure. Here the two tiles are far enough
+  // apart to plan into separate groups, and only one of them is served.
+  it('answers a tile whose group succeeded even when another group in the batch failed', async () => {
+    COPCTilesetProvider.registerCrs(2992, OREGON);
+    const { fetch, ranges } = fixtureFetch([
+      { offset: 0, bytes: HEAD },
+      { offset: 375, bytes: VLRS },
+      { offset: 81_114_146, bytes: ROOT_HIERARCHY },
+      // 4-2-0-0 alone. 4-0-14-0 sits 157 KB past its end, inside the 256 KiB
+      // gap threshold, so the two would merge — `ROOT_CHUNK` at 79 MB is the
+      // one that cannot, which is why it is the tile left unserved.
+      { offset: 1744, bytes: new Uint8Array(192_613) },
+    ]);
+
+    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
+    try {
+      const base = contentResourceOf(provider.tileset.root) as Resource;
+      const tokenBase = base.url.slice(0, -'n/0-0-0-0'.length);
+      const served = base.getDerivedResource({ url: `${tokenBase}n/4-2-0-0` });
+      // The fixture serves no slice covering this one, so its own request
+      // throws inside the stub — a failure of that group and of nothing else.
+      const unserved = base.getDerivedResource({ url: `${tokenBase}n/0-0-0-0` });
+
+      const [ok, failure] = await Promise.allSettled([
+        served.fetchArrayBuffer(),
+        unserved.fetchArrayBuffer(),
+      ]);
+
+      expect(ok.status).toBe('fulfilled');
+      expect(ok.status === 'fulfilled' ? ok.value?.byteLength : undefined).toBe(192_613);
+      expect(failure.status).toBe('rejected');
+
+      // Two groups, two requests: nothing was merged away, and the served
+      // tile's own request really did go out.
+      expect(ranges).toContain('bytes=1744-194356');
+    } finally {
+      provider.destroy();
+    }
   });
 
   // The per-host slot registry is process-wide module state keyed by origin,

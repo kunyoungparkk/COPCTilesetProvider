@@ -306,6 +306,37 @@ describe('retry policy', () => {
   });
 });
 
+/**
+ * The buffer `readMany` settled request `index` with, or a failure naming what
+ * it settled with instead.
+ *
+ * `readMany` never rejects — a request's outcome is its own group's — so a
+ * test that wants the bytes has to say so, and one that gets a rejection
+ * instead should read why rather than `undefined is not a function`.
+ */
+function fulfilled(
+  results: readonly PromiseSettledResult<ArrayBuffer>[],
+  index: number,
+): ArrayBuffer {
+  const result = results[index];
+  if (result?.status !== 'fulfilled') {
+    throw new Error(`request ${index} did not settle with bytes: ${JSON.stringify(result)}`);
+  }
+  return result.value;
+}
+
+/** The reason `readMany` settled request `index` with, or a failure if it succeeded. */
+function rejection(
+  results: readonly PromiseSettledResult<ArrayBuffer>[],
+  index: number,
+): unknown {
+  const result = results[index];
+  if (result?.status !== 'rejected') {
+    throw new Error(`request ${index} was expected to fail, and did not`);
+  }
+  return result.reason;
+}
+
 describe('readMany', () => {
   it('reads neighbouring ranges in one request and splits the result', async () => {
     // Two 4-byte reads with a 2-byte gap: one 10-byte span. Based at file
@@ -327,8 +358,8 @@ describe('readMany', () => {
 
     expect(calls).toEqual([{ url: FILE_URL, range: 'bytes=1000-1009' }]);
     expect(overruns.count).toBe(0);
-    expect(new Uint8Array(results[0]!)).toEqual(new Uint8Array([1, 2, 3, 4]));
-    expect(new Uint8Array(results[1]!)).toEqual(new Uint8Array([5, 6, 7, 8]));
+    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([5, 6, 7, 8]));
   });
 
   it('returns buffers in the caller order even when the file order differs', async () => {
@@ -340,8 +371,8 @@ describe('readMany', () => {
       { offset: 0, length: 2 },
     ]);
 
-    expect(new Uint8Array(results[0]!)).toEqual(new Uint8Array([3, 4]));
-    expect(new Uint8Array(results[1]!)).toEqual(new Uint8Array([1, 2]));
+    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([3, 4]));
+    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([1, 2]));
   });
 
   it('issues one request per group when ranges are too far apart', async () => {
@@ -399,19 +430,121 @@ describe('readMany', () => {
   });
 
   // A merged span is verified exactly like any other read (Decision 4).
-  it('rejects a merged span whose Content-Range does not match', async () => {
+  it('fails both callers of a merged span whose Content-Range does not match', async () => {
     const { fetch } = stubFetch(partial(new ArrayBuffer(10), 'bytes 0-8/1000'));
 
     // Same relaxed cap as the first test, and for the same reason: without
     // it these two ranges land in separate groups, and the second group's
     // fetch call races an unrelated stub-exhaustion error instead of
     // exercising the merged-read verification this test is named for.
-    await expect(
-      createRangeReader(FILE_URL, { fetch, retryDelaysMs: [], maxWasteRatio: 1 }).readMany([
-        { offset: 0, length: 4 },
-        { offset: 6, length: 4 },
-      ]),
-    ).rejects.toMatchObject({ code: 'content-range-mismatch' });
+    const results = await createRangeReader(FILE_URL, {
+      fetch,
+      retryDelaysMs: [],
+      maxWasteRatio: 1,
+    }).readMany([
+      { offset: 0, length: 4 },
+      { offset: 6, length: 4 },
+    ]);
+
+    // One request served both, so both callers inherit its verdict — this is
+    // the case where sharing a failure is right, and the test below is the
+    // case where it is not.
+    expect(rejection(results, 0)).toMatchObject({ code: 'content-range-mismatch' });
+    expect(rejection(results, 1)).toMatchObject({ code: 'content-range-mismatch' });
+  });
+
+  // The reason readMany settles per request rather than rejecting as a whole.
+  // A frame's reads routinely plan into more than one group — a hierarchy page
+  // sits megabytes from any point chunk — and Cesium marks a failed tile
+  // FAILED, a state `requestContent` never revisits. Reporting one group's
+  // timeout as every group's failure would blank tiles whose own bytes were
+  // already in hand, until the page was reloaded.
+  it('fails only the group that failed, and still answers the group that did not', async () => {
+    const { fetch, calls } = stubFetch(
+      partial(new Uint8Array([1, 2]).buffer, 'bytes 0-1/9000000'),
+      new Response(null, { status: 404 }),
+    );
+
+    // 8 MB apart, far outside the 256 KiB gap threshold (§7): two groups, two
+    // requests, and the stub answers the first and refuses the second.
+    const results = await createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).readMany([
+      { offset: 0, length: 2 },
+      { offset: 8_000_000, length: 2 },
+    ]);
+
+    expect(calls).toHaveLength(2);
+    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2]));
+    expect(rejection(results, 1)).toMatchObject({ code: 'range-request-failed', status: 404 });
+  });
+
+  // Every tile read on a frame where nothing merged arrives as a group of one
+  // covering its whole span, so a copy there is the common case rather than
+  // the exception — a second allocation of the whole chunk, per tile, per
+  // frame. The response body is this caller's already.
+  it('hands a group of one its response buffer rather than a copy of it', async () => {
+    const body = new Uint8Array([1, 2, 3, 4]).buffer;
+    // Hand-built rather than a real `Response`, whose own `arrayBuffer()`
+    // allocates: identity is the whole assertion, so the buffer this reader
+    // is handed has to be one the test still holds.
+    const fetch = (() =>
+      Promise.resolve({
+        status: 206,
+        headers: new Headers({ 'content-range': 'bytes 0-3/1000' }),
+        body: null,
+        arrayBuffer: () => Promise.resolve(body),
+      })) as unknown as typeof globalThis.fetch;
+
+    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
+      { offset: 0, length: 4 },
+    ]);
+
+    expect(fulfilled(results, 0)).toBe(body);
+  });
+
+  // The other half of the rule above: a merged response must be split into
+  // buffers of its own, because each goes to a different tile and the codec
+  // transfers it to a Worker — which detaches it, and would take its
+  // neighbours' bytes with it if they were views on one buffer.
+  it('gives each caller of a merged span a buffer of its own', async () => {
+    const span = new Uint8Array([1, 2, 3, 4, 9, 9, 5, 6, 7, 8]).buffer;
+    const { fetch } = stubFetch(partial(span, 'bytes 0-9/100000'));
+
+    const results = await createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 }).readMany([
+      { offset: 0, length: 4 },
+      { offset: 6, length: 4 },
+    ]);
+
+    const first = fulfilled(results, 0);
+    const second = fulfilled(results, 1);
+    expect(first).not.toBe(second);
+    expect(first.byteLength).toBe(4);
+    expect(second.byteLength).toBe(4);
+  });
+
+  // planCoalescedReads refuses to plan ranges it cannot merge soundly — an
+  // overlap, which in a COPC file means a hierarchy whose chunks disagree
+  // about where a node's bytes are. That is a reason not to merge them, not a
+  // reason to refuse to read them: unmerged they are ordinary requests, and
+  // the defect surfaces where it did before merging existed, at decode.
+  it('reads a batch the planner refuses one range at a time', async () => {
+    const { fetch, calls } = stubFetch(
+      partial(new Uint8Array([1, 2, 3, 4]).buffer, 'bytes 0-3/1000'),
+      partial(new Uint8Array([3, 4]).buffer, 'bytes 2-3/1000'),
+    );
+
+    // The second range starts inside the first: planCoalescedReads throws
+    // rather than producing slices that would hand two callers overlapping
+    // bytes (`tests/coalesce.test.ts` pins that throw directly).
+    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
+      { offset: 0, length: 4 },
+      { offset: 2, length: 2 },
+    ]);
+
+    expect(calls.map((call) => call.range)).toEqual(['bytes=0-3', 'bytes=2-3']);
+    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([3, 4]));
+    // Nothing was merged, so nothing was saved.
+    expect(createRangeReader(FILE_URL, { fetch }).stats().requestsSaved).toBe(0);
   });
 });
 
@@ -475,15 +608,15 @@ describe('stats', () => {
     controller.abort();
     const reader = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 });
 
-    await expect(
-      reader.readMany(
-        [
-          { offset: 0, length: 4 },
-          { offset: 6, length: 4 },
-        ],
-        controller.signal,
-      ),
-    ).rejects.toMatchObject({ name: 'AbortError' });
+    const results = await reader.readMany(
+      [
+        { offset: 0, length: 4 },
+        { offset: 6, length: 4 },
+      ],
+      controller.signal,
+    );
+    expect(rejection(results, 0)).toMatchObject({ name: 'AbortError' });
+    expect(rejection(results, 1)).toMatchObject({ name: 'AbortError' });
 
     expect(calls).toEqual([]);
     expect(reader.stats()).toEqual({
@@ -647,13 +780,14 @@ describe('cancellation', () => {
       ],
       controller.signal,
     );
-    const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     controller.abort();
-    await assertion;
+    const results = await pending;
+    expect(rejection(results, 0)).toMatchObject({ name: 'AbortError' });
+    expect(rejection(results, 1)).toMatchObject({ name: 'AbortError' });
 
-    // Promise.all rejects as soon as one group does, so that rejection alone
-    // cannot tell a cancelled sibling from an orphaned one left holding a
-    // connection open forever. Comparing what started against what aborted can.
+    // Each group settles its own callers, so the results alone cannot tell a
+    // cancelled sibling from an orphaned one left holding a connection open
+    // forever. Comparing what started against what aborted can.
     expect(started).toEqual(['bytes=0-1', 'bytes=8000000-8000001']);
     expect([...aborted].sort()).toEqual([...started].sort());
   });

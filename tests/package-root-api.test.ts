@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   BudgetCounterStats,
@@ -10,6 +8,7 @@ import type {
 } from 'copc-tileset-provider';
 import { COPCTilesetProvider } from 'copc-tileset-provider';
 import { createWorkerHandler } from 'copc-tileset-provider/worker';
+import { fixtureBytes as load, fixtureFetch } from './fixtures.js';
 
 /**
  * Every import above names the package rather than a path into `src/`, and
@@ -27,50 +26,19 @@ import { createWorkerHandler } from 'copc-tileset-provider/worker';
  * tarball installed into a real project.
  */
 
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
 // Same proj4 definition every other suite registers for Autzen's own
 // horizontal system (EPSG:2992, international feet).
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
-const HEAD = load('autzen-head.bin');
-const VLRS = load('autzen-vlrs.bin');
-const ROOT_HIERARCHY = load('autzen-root-hierarchy.bin');
-const TOTAL_BYTES = 81_123_042;
-
 /** Serves the three bootstrap ranges as 206 responses, and refuses anything else. */
-function autzenFetch(): typeof globalThis.fetch {
-  const slices = [
-    { offset: 0, bytes: HEAD },
-    { offset: 375, bytes: VLRS },
-    { offset: 81_114_146, bytes: ROOT_HIERARCHY },
-  ];
-  return ((_input: unknown, init?: RequestInit) => {
-    const range = new Headers(init?.headers).get('range');
-    const match = range === null ? null : /^bytes=(\d+)-(\d+)$/.exec(range);
-    if (match?.[1] === undefined || match[2] === undefined) {
-      throw new Error(`expected a byte range header, got ${String(range)}`);
-    }
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const slice = slices.find(
-      (candidate) =>
-        start >= candidate.offset && end < candidate.offset + candidate.bytes.length,
-    );
-    if (slice === undefined) {
-      throw new Error(`no fixture slice covers bytes ${start}-${end}`);
-    }
-    return Promise.resolve(
-      new Response(slice.bytes.slice(start - slice.offset, end - slice.offset + 1), {
-        status: 206,
-        headers: { 'content-range': `bytes ${start}-${end}/${TOTAL_BYTES}` },
-      }),
-    );
-  }) as unknown as typeof globalThis.fetch;
-}
+const autzenFetch = (): typeof globalThis.fetch =>
+  fixtureFetch([
+    { offset: 0, bytes: load('autzen-head.bin') },
+    { offset: 375, bytes: load('autzen-vlrs.bin') },
+    { offset: 81_114_146, bytes: load('autzen-root-hierarchy.bin') },
+  ]).fetch;
 
 /**
  * A `WorkerPort` built out of `createWorkerHandler` alone — the platform

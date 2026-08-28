@@ -26,8 +26,14 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
 
 - 모든 내부 접근을 `src/cesium-runtime/` 한 곳에 격리 (정적 검사로 강제)
 - 지원 버전을 검증된 1.142.0~1.144.x로 제한 (peer dependency)
-- 경계 규칙: source는 Cesium을 모른다. cesium-runtime 밖에서 underscore
-  필드·factory 접근 시 정적 검사가 빌드를 실패시킨다.
+- 경계 규칙: source는 Cesium을 모른다. 검사가 실제로 보는 것은 **import
+  지정자**다 — `src/cesium-runtime/` 밖의 파일이 `cesium`이나 `@cesium/engine`을
+  import하면 `tests/cesium-boundary.test.ts`가 실패하고, CI가 이 스위트를 돌리므로
+  머지가 막힌다. underscore 필드나 factory 접근 자체를 보는 것이 아니다:
+  Cesium을 import할 수 없는 파일은 그 필드에 닿을 경로가 없으므로 import 하나를
+  보는 것으로 충분하다. 이 검사가 덮지 못하는 것은 하나 — 인자로 건네받은 Cesium
+  객체의 `_` 필드를 밖에서 만지는 코드다. cesium-runtime이 그런 객체를 경계 밖으로
+  내보내지 않는 한 생기지 않는 경로이고, 그건 검사가 아니라 설계가 지킨다.
 - 검증 현황: **범위 양 끝이 렌더로 검증됨**(1.142.0과 1.144.0, headless Chromium —
   각각 47점·20픽셀, provider 없는 대조군 0픽셀). 최초 hard gate는 1.143.0에서 통과했다.
   하한이 1.142인 것은 선택이 아니라 실측이다: 1.141에는 `_runtimeContentCodec` 슬롯
@@ -161,8 +167,12 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
     싣고, Node 22는 npm 10을 싣는다.
   - TS 7의 `typescript` 패키지는 네이티브 컴파일러 래퍼라 JS 컴파일러 API를
     노출하지 않는다(7.0.2에서 `createProgram`·`createSourceFile` 부재 실측).
-    결정 2의 경계 정적 검사를 typescript-eslint·ts-morph 위에 지을 수 없으므로
-    네이티브 린터(Biome·oxlint)나 경로 규칙 검사로 구현한다.
+    결정 2의 경계 정적 검사를 typescript-eslint·ts-morph 위에 지을 수 없다.
+    린터(Biome·oxlint)를 들이는 대신 스캐너를 직접 썼다 —
+    `tests/import-closure.ts`가 import 지정자를 훑고, 경계 테스트 세 개가 그 위에
+    서 있다(Cesium·CRS 레지스트리·Worker 풀). 의존성이 늘지 않고 스위트 안에서
+    돌아 CI가 이미 게이트다. 대가는 그 스캐너를 우리가 유지해야 한다는 것이고,
+    그래서 스캐너 자신에게도 테스트 파일이 있다.
     계약 문자열 검사는 파일 문자열 탐색이라 영향받지 않는다.
 - 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
   이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
@@ -213,7 +223,7 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
 | Range 타임아웃 | 8s + 요청 1MB당 2s 추가 | 병합으로 요청이 커지면 시간도 그만큼 더 받게 — 큰 요청이 작은-요청용 시한에 걸려 죽는 것 방지 |
 | geometricError 루트 상수 N | 16 | 키우면 로드량↓ 화질↓. maximumScreenSpaceError와 한 쌍으로 튜닝 |
 | maximumScreenSpaceError 기본값 (공개 옵션) | 16 | Cesium 표준 노브. 선행 구현 기본값은 8 — 데모에서 비교 |
-| 호스트당 동시 요청 상한 | 6 | HTTP/1.1 브라우저 연결 천장. 초과 시 타임아웃 폭풍 실측 선례. HTTP/2 CDN이면 상향 실험 |
+| 호스트당 동시 요청 상한 | 6 | HTTP/1.1 브라우저 연결 천장. 초과 시 타임아웃 폭풍 실측 선례. **병합을 켠 뒤로 이 값이 세는 것은 연결이 아니라 승인된 타일 읽기다** — 승인은 타일마다, 병합은 그 뒤에 일어나므로 실제 연결 수는 언제나 이 값 이하다. 틀린 게 아니라 보수적인 것이고, 대가는 병합 계수만큼 연결을 덜 쓰는 것. 재측정에 필요한 그 계수는 `stats()`가 이미 준다: `(requests + requestsSaved) / requests`. 값을 올리려면 그 수치와 함께 올릴 것. HTTP/2 CDN이면 상향 실험 |
 | Worker 풀 크기 | 4 | 선행 실측상 디코드는 비병목(전체 시간의 <1%) — 확대 이득 낮음. (PNTS 파이프라인 실측, 50k점·단일 머신·웜, 워커 세 단계 전부를 분모로: decode 0.90µs/점 31.3%, positions 1.77µs/점 61.4%, encode 0.21µs/점 7.3%. 디코드는 <1%가 아니라 31%지만 병목도 아니다 — 지배적인 것은 positions이고, 그 안은 proj4 forward + ECEF 변환이다. 따라서 여기서 얻을 것은 풀 확대가 아니라 배치 변환 API다. 값은 그대로 둠: 실측한 것은 한 머신의 단계별 한계비용이지 워커 풀이 아님 — 풀 실측 전까지 4를 유지) |
 | 예산 상한: Range 동시 body | 32MB | 임의 시작점. 첫 프로파일링에서 재설정 |
 | 예산 상한: decode 동시 작업 | 풀 크기 × 2 | 임의 시작점. Worker 큐 깊이 관측으로 조정 |

@@ -3,13 +3,20 @@ import { Counter } from './counter.js';
 /**
  * Host request slots: process-wide, keyed by origin.
  *
- * Module state on purpose. OVERVIEW §7's cap of 6 concurrent requests is the
+ * Module state on purpose. OVERVIEW §7's cap of 6 is sized against the
  * browser's per-host connection ceiling, which two providers reading the same
  * bucket genuinely share — unlike the other three budgets, this one belongs to
  * no single provider. A
  * provider's `destroy` releases only the slots that provider itself holds, by
  * walking its own outstanding leases; it never resets another provider's share
  * of an origin's counter.
+ *
+ * What a slot counts is one admitted *tile read*, which is not the same as one
+ * connection: a slot is taken before `createCoalescingReader` has had a chance
+ * to merge that read with its neighbours, and several slots can end up sharing
+ * one request. The cap therefore bounds connections from above rather than
+ * matching them — safe in the direction that matters, and costing only the
+ * connections it leaves unused. §7 carries the figure to retune it against.
  *
  * An origin's capacity is fixed by whichever `acquireRangeRequest` call first
  * touches it. A later `Budget` constructed with a different

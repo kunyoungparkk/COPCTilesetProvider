@@ -31,11 +31,6 @@ viewer.camera.flyTo({ destination: provider.extent });
 npm install copc-tileset-provider cesium
 ```
 
-`0.x` on purpose: every release is packed, installed into a throwaway project
-and rendered in headless Chromium, but the API has had no users outside this
-repository yet, so it may still move. What moved is in
-[CHANGELOG.md](CHANGELOG.md), where behaviour changes are marked as such.
-
 Cesium is a peer dependency, `>=1.142.0 <1.145.0`. Both ends of that range are
 rendered in a real browser before it is widened.
 

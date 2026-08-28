@@ -31,17 +31,26 @@ export interface CopcFile {
  * OVERVIEW §4 limits this to metadata and the root hierarchy. Read 1 must come
  * first: the other two ranges are both taken from what it reported, and
  * Decision 4 allows no request built on a guess. Reads 2 and 3 depend on read 1
- * and on nothing else, though, so Decision 4 would permit them concurrently —
- * sequencing them saves nothing and costs a round trip on every open, which is
- * on `fromUrl`'s critical path. Concurrency is also the only saving available
- * here: the VLR region sits near the start and the root page near EOF, 81 MB
- * apart in Autzen, so coalescing can never merge them. They stay sequential
- * because §7 takes a latency change from measurement in a fixed environment
- * rather than from reasoning, and nobody has measured this one — it is worth
- * doing in whichever sub-project owns `fromUrl` latency.
+ * and on nothing else, so they run together — waiting for the VLR region before
+ * asking for the root page spends a round trip to learn nothing, on the one
+ * path `fromUrl` cannot return without.
  *
- * No test pins that order, deliberately: sequential is a default we want
- * revisited with numbers, not behaviour someone would be wrong to break.
+ * Concurrency is the only saving available here. The VLR region sits near the
+ * start of the file and the root page near EOF — 81 MB apart in Autzen — so
+ * coalescing them into one request could never be worth it, and the reader
+ * `fromUrl` passes in is deliberately not the coalescing one.
+ *
+ * Running together means neither read may be left behind by the other. They
+ * share a signal this function owns, aborted the moment either one fails: with
+ * the root page known to be unreadable there is nothing left to do with a VLR
+ * region, and waiting for it costs §7's whole deadline plus both retry waits —
+ * around nineteen seconds — before a failure already known can be reported.
+ *
+ * `allSettled` rather than `all`, so which typed error a caller sees does not
+ * depend on which read lost a race. Two failures that are genuinely the file's
+ * are reported WKT-first, the order these had in sequence; a read this
+ * function aborted is never the report, since all it says is that the other
+ * one failed first.
  */
 export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promise<CopcFile> {
   const { header, info, totalBytes } = await readFileHeader(reader, signal);
@@ -49,8 +58,6 @@ export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promi
   if (!COPC_POINT_FORMATS.has(header.pointDataRecordFormat)) {
     throw new UnsupportedPointFormatError(reader.url, header.pointDataRecordFormat);
   }
-
-  const wkt = await readWkt(reader, header, signal);
 
   // The COPC spec requires the hierarchy VLR to exist and to "always consist
   // of at least ONE hierarchy page" (copc.io, hierarchy VLR section) — an
@@ -60,6 +67,10 @@ export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promi
   // reason: a zero-length ByteRange throws in formatRangeHeader) and opens
   // successfully with an empty root page instead of naming the file as the
   // defect's source.
+  //
+  // Checked before the reads below rather than after, so a file this refuses
+  // still costs no request — the same reason `fromUrl` refuses a relative URL
+  // before opening anything.
   if (info.rootHierarchyPage.pageLength === 0) {
     throw new MalformedHierarchyError(
       reader.url,
@@ -68,14 +79,61 @@ export async function openCopc(reader: RangeReader, signal?: AbortSignal): Promi
     );
   }
 
-  // The one place `copc.js`'s pageOffset/pageLength spelling is translated into
-  // the library's own ByteRange, so nothing downstream has to know about it.
-  const root = await readHierarchyPage(
+  // What one read is aborted with when the other has already failed. Built
+  // per call so identity alone tells it apart from anything a reader could
+  // raise, and an `Error` rather than a bare token so that a path nobody has
+  // thought of still ends in something readable.
+  const siblingFailed = new Error("openCopc: the other of this file's two reads failed first");
+
+  // Reads 2 and 3 share this rather than the caller's own signal, so that
+  // either one's failure can end the other. The caller's abort still reaches
+  // both, forwarded below.
+  const stop = new AbortController();
+  const onCallerAbort = (): void => stop.abort(signal?.reason);
+  if (signal?.aborted === true) {
+    // An `abort` that has already fired never replays for a listener added
+    // afterwards, so this case has to be forwarded by hand.
+    stop.abort(signal.reason);
+  } else {
+    signal?.addEventListener('abort', onCallerAbort, { once: true });
+  }
+
+  const wkt = readWkt(reader, header, stop.signal);
+  // The one place `copc.js`'s pageOffset/pageLength spelling is translated
+  // into the library's own ByteRange, so nothing downstream has to know
+  // about it.
+  const root = readHierarchyPage(
     reader,
     { offset: info.rootHierarchyPage.pageOffset, length: info.rootHierarchyPage.pageLength },
     header.pointCount,
-    signal,
+    stop.signal,
   );
+  for (const read of [wkt, root]) {
+    // Nothing awaits these handlers, so they cannot reorder the settlement
+    // below; they only bring the other read to an end early.
+    void read.catch(() => stop.abort(siblingFailed));
+  }
 
-  return { header, info, wkt, totalBytes, root };
+  let wktRead: PromiseSettledResult<string | undefined>;
+  let rootRead: PromiseSettledResult<HierarchyPage>;
+  try {
+    [wktRead, rootRead] = await Promise.allSettled([wkt, root]);
+  } finally {
+    // A no-op when none was added, which is what makes the already-aborted
+    // branch above safe to take.
+    signal?.removeEventListener('abort', onCallerAbort);
+  }
+
+  if (wktRead.status === 'rejected') {
+    // `siblingFailed` means this read was ended because the other one had
+    // already failed, so the other one's reason is the answer.
+    throw wktRead.reason === siblingFailed && rootRead.status === 'rejected'
+      ? rootRead.reason
+      : wktRead.reason;
+  }
+  if (rootRead.status === 'rejected') {
+    throw rootRead.reason;
+  }
+
+  return { header, info, wkt: wktRead.value, totalBytes, root: rootRead.value };
 }

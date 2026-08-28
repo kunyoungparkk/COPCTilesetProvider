@@ -52,6 +52,12 @@ export interface BudgetStats {
    * rejects both rows unconditionally, since destruction is not a fact about
    * either side individually.
    *
+   * None of these counts HTTP requests. A slot is taken per tile read, before
+   * `createCoalescingReader` merges that read with the others admitted in the
+   * same frame, so several admissions here can share one request — see
+   * `host-registry.ts` for what that means for §7's cap. `RangeStats` is where
+   * the requests themselves are counted.
+   *
    * `inUse` and `peak` are summed across every origin this provider has
    * touched, which can misreport §7's per-origin host-cap number in either
    * direction: a provider that itself uses more than one origin will see

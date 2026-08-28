@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeHierarchyPage as buildPage } from './hierarchy-page.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
 import type { ByteRange, RangeReader } from '../src/range/index.js';
+import { bufferReader } from './fake-reader.js';
+import { fixtureBytes, TOTAL_BYTES } from './fixtures.js';
 
-const ROOT = new Uint8Array(
-  readFileSync(fileURLToPath(new URL('../fixtures/autzen-root-hierarchy.bin', import.meta.url))),
-);
+const ROOT = fixtureBytes('autzen-root-hierarchy.bin');
 const ROOT_PAGE = { offset: 81_114_146, length: 8896 };
 
 /** Autzen's own header count, read from `fixtures/autzen-head.bin` (uint64 at 247). */
@@ -17,22 +15,10 @@ const AUTZEN_POINTS = 10_653_336;
 // construction. Only the tests that are about the bound itself pass their own.
 const FILE_POINTS = 1_000_000;
 
+/** `page`'s bytes, served at the file offset `at` they were cut from. */
 function pageReader(page: Uint8Array, at: number) {
-  const reads: ByteRange[] = [];
-  const reader: RangeReader = {
-    url: 'https://host/autzen.copc.laz',
-    read: (range) => {
-      reads.push(range);
-      const start = range.offset - at;
-      return Promise.resolve({
-        bytes: page.slice(start, start + range.length).buffer as ArrayBuffer,
-        totalBytes: 81_123_042,
-      });
-    },
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-  return { reader, reads };
+  const reader = bufferReader(page, { baseOffset: at, totalBytes: TOTAL_BYTES });
+  return { reader, reads: reader.reads };
 }
 
 describe('readHierarchyPage against the pinned root page', () => {

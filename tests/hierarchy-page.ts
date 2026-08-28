@@ -1,5 +1,6 @@
 import type { HierarchyPage } from '../src/copc/index.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
+import { bufferReader } from './fake-reader.js';
 
 /** One COPC hierarchy entry, in the form the file stores rather than the form we read. */
 export interface PageEntryBytes {
@@ -61,18 +62,7 @@ export function hierarchyPageOf(
   filePointCount = CONSTRUCTED_FILE_POINTS,
 ): Promise<HierarchyPage> {
   const bytes = encodeHierarchyPage(entries);
-  const reader = {
-    url: 'https://host/constructed.copc.laz',
-    read: () => Promise.resolve({ bytes: bytes.buffer.slice(0) as ArrayBuffer, totalBytes: null }),
-    readMany: () => Promise.reject(new Error('constructed pages are read one at a time')),
-    stats: () => ({
-      requests: 0,
-      retries: 0,
-      bytesRequested: 0,
-      bytesWasted: 0,
-      requestsSaved: 0,
-    }),
-  };
+  const reader = bufferReader(bytes, { url: 'https://host/constructed.copc.laz' });
 
   return readHierarchyPage(reader, { offset: 0, length: bytes.byteLength }, filePointCount);
 }

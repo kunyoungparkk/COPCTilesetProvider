@@ -1,6 +1,6 @@
 {
   "name": "copc-tileset-provider",
-  "version": "0.3.0",
+  "version": "0.9.0",
   "description": "Stream static COPC point clouds into CesiumJS with no pre-tiling step.",
   "keywords": [
     "copc",
@@ -47,7 +47,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "rm -rf dist && rolldown -c rolldown.config.mjs && tsc -p tsconfig.build.json && node build/third-party-notices.mjs dist/THIRD-PARTY-NOTICES.md && node build/assert-bundles.mjs dist",
+    "build": "node build/clean.mjs dist && rolldown -c rolldown.config.mjs && tsc -p tsconfig.build.json && node build/third-party-notices.mjs dist/THIRD-PARTY-NOTICES.md && node build/assert-bundles.mjs dist",
     "smoke": "npm run build && node smoke/run.mjs",
     "notices": "node build/third-party-notices.mjs THIRD-PARTY-NOTICES.md"
   },

@@ -1,16 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import type { Resource } from 'cesium';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as budgetModule from '../src/budget/index.js';
 import { COPCTilesetProvider, DELEGATED_PRIMITIVE_METHODS } from '../src/cesium-runtime/provider.js';
 import * as poolModule from '../src/worker/pool.js';
 import type { WorkerPort } from '../src/worker/pool.js';
+import { fixtureBytes as load, fixtureFetch } from './fixtures.js';
 import { encodeHierarchyPage } from './hierarchy-page.js';
-
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
 
 // Same proj4 definition tests/cesium-provider.test.ts and tests/cesium-codec.test.ts
 // register for Autzen's own horizontal system (EPSG:2992, international feet).
@@ -21,45 +18,13 @@ const OREGON =
 const HEAD = load('autzen-head.bin');
 const VLRS = load('autzen-vlrs.bin');
 const ROOT_HIERARCHY = load('autzen-root-hierarchy.bin');
-const TOTAL_BYTES = 81_123_042;
-
-/** Serves a fixed set of byte ranges as 206 responses, and refuses anything else. */
-function fixtureFetch(slices: readonly { offset: number; bytes: Uint8Array }[]) {
-  const fetch = ((_input: unknown, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
-    const range = headers.get('range');
-    const match = range === null ? null : /^bytes=(\d+)-(\d+)$/.exec(range);
-    if (match?.[1] === undefined || match[2] === undefined) {
-      throw new Error(`expected a byte range header, got ${String(range)}`);
-    }
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const length = end - start + 1;
-    const slice = slices.find(
-      (candidate) =>
-        start >= candidate.offset && start + length <= candidate.offset + candidate.bytes.length,
-    );
-    if (slice === undefined) {
-      throw new Error(`no fixture slice covers bytes ${start}-${end}`);
-    }
-    const from = start - slice.offset;
-    const body = slice.bytes.slice(from, from + length);
-    return Promise.resolve(
-      new Response(body, {
-        status: 206,
-        headers: { 'content-range': `bytes ${start}-${end}/${TOTAL_BYTES}` },
-      }),
-    );
-  }) as unknown as typeof globalThis.fetch;
-  return fetch;
-}
 
 const autzenFetch = () =>
   fixtureFetch([
     { offset: 0, bytes: HEAD },
     { offset: 375, bytes: VLRS },
     { offset: 81_114_146, bytes: ROOT_HIERARCHY },
-  ]);
+  ]).fetch;
 
 /** None of these tests ever admits a decode job, so a call here is a defect. */
 const spawnWorker = (): WorkerPort => {
@@ -472,7 +437,7 @@ describe('the multi-page fixture: a hierarchy sub-page expanded through the inst
     hierarchyResource: Resource;
   }> {
     COPCTilesetProvider.registerCrs(2992, OREGON);
-    const fetch = fixtureFetch([
+    const { fetch } = fixtureFetch([
       { offset: 0, bytes: headWithSmallRootHierarchy() },
       { offset: 375, bytes: VLRS },
       { offset: ROOT_HIER_OFFSET, bytes: ROOT_HIERARCHY_PAGE },

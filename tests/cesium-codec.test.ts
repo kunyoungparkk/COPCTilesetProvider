@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Info, Las } from 'copc';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Admission, Budget } from '../src/budget/index.js';
@@ -19,13 +17,11 @@ import type { DecodeHeader } from '../src/worker/index.js';
 import { createWorkerPool } from '../src/worker/pool.js';
 import type { WorkerPool } from '../src/worker/pool.js';
 import { autzenWkt } from './autzen-wkt.js';
+import { bufferReader } from './fake-reader.js';
+import { FILE_URL, fixtureBytes as fixture } from './fixtures.js';
 import { encodeHierarchyPage } from './hierarchy-page.js';
 import { createNodeWorkerPort } from './worker-port-node.js';
 
-const fixture = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
-const FILE_URL = 'https://host/autzen.copc.laz';
 const TOKEN_BASE = 'copc://a1b2c3/';
 
 // Same proj4 definition tests/worker-pnts.test.ts and tests/worker-entry.test.ts
@@ -33,20 +29,6 @@ const TOKEN_BASE = 'copc://a1b2c3/';
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
-/** A reader that serves one fixed buffer, regardless of the range asked for. */
-function bufferReader(bytes: Uint8Array): RangeReader {
-  return {
-    url: FILE_URL,
-    read: (range: ByteRange) =>
-      Promise.resolve({
-        bytes: bytes.slice(range.offset, range.offset + range.length).buffer as ArrayBuffer,
-        totalBytes: null,
-      }),
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-}
 
 const autzenCube = () =>
   Info.parse(fixture('autzen-head.bin').subarray(429, 429 + 160)).cube;

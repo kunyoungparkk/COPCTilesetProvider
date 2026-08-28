@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Info, Las } from 'copc';
 import type { Bounds } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
+import { fixtureBytes } from './fixtures.js';
 import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
 import type { CrsTransform } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
@@ -14,10 +13,7 @@ const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
 
 const DEGREES = 180 / Math.PI;
 
-const head = (): Uint8Array =>
-  new Uint8Array(
-    readFileSync(fileURLToPath(new URL('../fixtures/autzen-head.bin', import.meta.url))),
-  );
+const head = (): Uint8Array => fixtureBytes('autzen-head.bin');
 
 // The info VLR sits at 375 + 54: the 375-byte LAS 1.4 header, then the 54-byte
 // VLR header in front of its 160-byte payload. Decision 4's first read covers

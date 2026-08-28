@@ -1,12 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
 import { describe, expect, it, vi } from 'vitest';
 import { readWkt } from '../src/copc/wkt.js';
-import type { ByteRange, RangeReader } from '../src/range/index.js';
-
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
+import type { RangeReader } from '../src/range/index.js';
+import { bufferReader } from './fake-reader.js';
+import { FILE_URL, fixtureBytes as load, TOTAL_BYTES } from './fixtures.js';
 
 const HEAD = load('autzen-head.bin');
 const VLRS = load('autzen-vlrs.bin');
@@ -14,21 +11,11 @@ const HEADER = Las.Header.parse(HEAD.subarray(0, 375));
 
 /** Serves the VLR region at its real file offset, and nothing else. */
 function vlrReader(region: Uint8Array = VLRS, header: Las.Header = HEADER) {
-  const reads: ByteRange[] = [];
-  const reader: RangeReader = {
-    url: 'https://host/autzen.copc.laz',
-    read: (range) => {
-      reads.push(range);
-      const start = range.offset - header.headerLength;
-      return Promise.resolve({
-        bytes: region.slice(start, start + range.length).buffer as ArrayBuffer,
-        totalBytes: 81_123_042,
-      });
-    },
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-  return { reader, reads };
+  const reader = bufferReader(region, {
+    baseOffset: header.headerLength,
+    totalBytes: TOTAL_BYTES,
+  });
+  return { reader, reads: reader.reads };
 }
 
 const VLR_HEADER_LENGTH = 54;
@@ -207,7 +194,7 @@ describe('readWkt', () => {
   it('passes an abort signal straight through to the reader', async () => {
     const controller = new AbortController();
     const read = vi.fn().mockRejectedValue(new Error('should not resolve'));
-    const reader = { url: 'https://host/autzen.copc.laz', read } as unknown as RangeReader;
+    const reader = { url: FILE_URL, read } as unknown as RangeReader;
 
     await expect(readWkt(reader, HEADER, controller.signal)).rejects.toThrow();
     expect(read).toHaveBeenCalledWith({ offset: 375, length: 1361 }, controller.signal);

@@ -10,15 +10,16 @@ import {
 import type { RangeRead, RangeReader } from '../src/range/index.js';
 import { ScheduledRangeResource, type InterceptContext } from '../src/cesium-runtime/resource.js';
 import type { TileEntry } from '../src/tileset/index.js';
+import { NO_STATS } from './fake-reader.js';
+// The remote COPC file this provider reads from — distinct from the Blob URL
+// the tileset JSON itself is served at, and from the tokenBase scheme.
+import { FILE_URL } from './fixtures.js';
 
 // This provider's own scheme, keyed to no real host. The shape is the one
 // `buildTileset` emits: `<tokenBase>n/<depth>-<x>-<y>-<z>` for a points tile,
 // `h/` for a hierarchy page.
 const TOKEN_BASE = 'copc://a1b2c3/';
 const ENTRY_URL = `${TOKEN_BASE}n/0-0-0-0`;
-// The remote COPC file this provider reads from — distinct from the Blob URL
-// the tileset JSON itself is served at, and from the tokenBase scheme.
-const FILE_URL = 'https://host/autzen.copc.laz';
 const TILESET_URL = 'blob:http://localhost/00000000-0000-0000-0000-000000000000';
 
 function makeEntry(): TileEntry {
@@ -80,13 +81,7 @@ function fakeReader(overrides: Partial<RangeReader> = {}): RangeReader {
     url: FILE_URL,
     read: vi.fn(() => Promise.reject(new Error('unexpected read in this test'))),
     readMany: vi.fn(),
-    stats: vi.fn(() => ({
-      requests: 0,
-      retries: 0,
-      bytesRequested: 0,
-      bytesWasted: 0,
-      requestsSaved: 0,
-    })),
+    stats: vi.fn(() => NO_STATS),
     ...overrides,
   };
 }

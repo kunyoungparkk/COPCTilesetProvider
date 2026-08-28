@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Cartesian3, Rectangle } from 'cesium';
 import type { Resource } from 'cesium';
 import { COPCTilesetProvider } from '../src/cesium-runtime/provider.js';
+import { fixtureBytes as fixture, fixtureFetch } from './fixtures.js';
 import { createNodeWorkerPort } from './worker-port-node.js';
 
 /**
@@ -19,9 +18,6 @@ import { createNodeWorkerPort } from './worker-port-node.js';
  * clone, so a mis-wiring is invisible until a chunk is actually decoded.
  */
 
-const fixture = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
 // Same proj4 definition every other suite registers for Autzen's own
 // horizontal system (EPSG:2992, international feet).
 const OREGON =
@@ -29,7 +25,6 @@ const OREGON =
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 const FILE_URL = 'https://point-tile-host.example/autzen.copc.laz';
-const TOTAL_BYTES = 81_123_042;
 
 // Node 5-16-3-1's own chunk, at the offset and length the pinned root
 // hierarchy page declares for it — the file's smallest node, 47 points, and
@@ -38,36 +33,13 @@ const NODE_KEY = '5-16-3-1';
 const NODE_CHUNK = { offset: 53_565_789, length: 951 };
 const NODE_POINTS = 47;
 
-function autzenFetch(): typeof globalThis.fetch {
-  const slices = [
+const autzenFetch = (): typeof globalThis.fetch =>
+  fixtureFetch([
     { offset: 0, bytes: fixture('autzen-head.bin') },
     { offset: 375, bytes: fixture('autzen-vlrs.bin') },
     { offset: 81_114_146, bytes: fixture('autzen-root-hierarchy.bin') },
     { offset: NODE_CHUNK.offset, bytes: fixture(`autzen-node-${NODE_KEY}.bin`) },
-  ];
-  return ((_input: unknown, init?: RequestInit) => {
-    const range = new Headers(init?.headers).get('range');
-    const match = range === null ? null : /^bytes=(\d+)-(\d+)$/.exec(range);
-    if (match?.[1] === undefined || match[2] === undefined) {
-      throw new Error(`expected a byte range header, got ${String(range)}`);
-    }
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const slice = slices.find(
-      (candidate) =>
-        start >= candidate.offset && end < candidate.offset + candidate.bytes.length,
-    );
-    if (slice === undefined) {
-      throw new Error(`no fixture slice covers bytes ${start}-${end}`);
-    }
-    return Promise.resolve(
-      new Response(slice.bytes.slice(start - slice.offset, end - slice.offset + 1), {
-        status: 206,
-        headers: { 'content-range': `bytes ${start}-${end}/${TOTAL_BYTES}` },
-      }),
-    );
-  }) as unknown as typeof globalThis.fetch;
-}
+  ]).fetch;
 
 // The pinned Autzen fixture's WKT declares vertical CRS EPSG:6360, and
 // `fromUrl` here is never given a `geoidHeight` — correct behaviour (tested

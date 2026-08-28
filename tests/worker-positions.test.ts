@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
@@ -9,29 +7,11 @@ import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
 // (tests/crs-worker-boundary.test.ts enforces that for this barrel).
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import type { CrsTransform } from '../src/crs/worker.js';
-import type { ByteRange, RangeReader } from '../src/range/index.js';
 import { decodeChunk } from '../src/worker/decode.js';
 import { toRelativePositions } from '../src/worker/positions.js';
 import { autzenWkt } from './autzen-wkt.js';
-
-const fixture = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
-
-const URL_ = 'https://host/autzen.copc.laz';
-
-/** A reader that serves one fixed buffer, regardless of the range asked for. */
-function bufferReader(bytes: Uint8Array): RangeReader {
-  return {
-    url: URL_,
-    read: (range: ByteRange) =>
-      Promise.resolve({
-        bytes: bytes.slice(range.offset, range.offset + range.length).buffer as ArrayBuffer,
-        totalBytes: null,
-      }),
-    readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
-  };
-}
+import { bufferReader } from './fake-reader.js';
+import { fixtureBytes as fixture } from './fixtures.js';
 
 // Same proj4 definition tests/crs-transform.test.ts registers for EPSG:2992 —
 // Autzen's own horizontal system, in international feet.

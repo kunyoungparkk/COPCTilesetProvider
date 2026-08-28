@@ -7,8 +7,33 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-28
+
+The release that makes Decision 4's merge real. `0.9.0` rather than `0.4.0`
+because the API is where it is meant to be for `1.0`: nothing here adds or
+removes a public name, and what changed is how many requests reach the server
+and how quickly a failure is reported.
+
 ### Changed
 
+- **Behaviour:** tile reads issued in the same frame are now merged into as few
+  Range requests as OVERVIEW Decision 4's gap and waste thresholds allow. The
+  merging itself always existed; nothing on a production path called it, so
+  every tile read a request of its own and `stats().range.requestsSaved` and
+  `bytesWasted` could only ever report `0`. Both now carry real numbers, which
+  is what §7's merge thresholds are meant to be retuned against.
+  Sharing a request changes only when a tile's bytes arrive: each tile takes
+  its own merged request's outcome, so one request's failure never fails a tile
+  whose own bytes came back, and a cancelled tile is answered — and its byte
+  budget and host slot released — the moment Cesium cancels it. The transfer
+  itself is abandoned only once every tile sharing it has been cancelled.
+- `fromUrl` reads the VLR region and the root hierarchy page concurrently
+  instead of one after the other, saving a round trip on open. Still three
+  requests, and still no request built on anything but what the one before it
+  reported. Either read ends the other the moment it fails, so a failure is
+  reported as soon as it is known rather than after the surviving read has run
+  out its deadline and retries. A file whose info VLR declares a zero-length
+  root page is now refused after one request rather than two.
 - **`engines.node` is now `>=24`**, up from `>=22`. This is a browser library,
   so the floor is about the toolchain rather than the runtime a consumer's page
   uses, but it is raised rather than left generous because nothing below 24 is
@@ -19,6 +44,30 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
   token, which npm withdrew after the May 2026 account compromises. The
   workflow now holds no npm credential, and provenance is attached
   automatically rather than by a `--provenance` flag.
+
+### Fixed
+
+- `npm run build` no longer opens with `rm -rf`, which `cmd.exe` has no command
+  for — the build could not run on a Windows checkout without a POSIX `rm`
+  earlier on `PATH`. CI now runs `npm run build` on both hosts, so the script
+  cannot regress to a POSIX-only shape unnoticed.
+- `npm run smoke` runs to the end on Windows. It spawned `mkdir`, which is a
+  `cmd.exe` builtin rather than an executable there, so the pre-publish check
+  died before reaching anything it exists to judge.
+
+### Internal
+
+No consumer-visible effect, recorded because a reader of the diff will ask.
+
+- A Worker builds its coordinate transform once, at `init`, instead of once per
+  chunk. The point is not speed — a build measures 9.9µs against roughly 86ms
+  to encode a 30k-point node — but that the transform `init` validated is the
+  one every chunk then uses, and that an encode after a failed `init` is now
+  refused by structure rather than by a second throw further down.
+- The suite has one fixture loader and one fake Range server instead of a copy
+  per file, and `OVERVIEW.md` now states what §7's per-host cap counts: admitted
+  tile reads, which merging can collapse into fewer connections, so the cap
+  bounds connections from above rather than matching them.
 
 ## [0.3.0] — 2026-08-27
 
@@ -107,7 +156,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...v0.9.0
 [0.3.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.1.0...v0.1.1

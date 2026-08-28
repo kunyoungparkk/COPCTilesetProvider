@@ -1,9 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { Las } from 'copc';
-
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
+import { fixtureBytes as load } from './fixtures.js';
 
 /**
  * Autzen's real WKT, read out of the pinned VLR region.

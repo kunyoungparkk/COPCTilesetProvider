@@ -7,7 +7,7 @@
 // can show itself. It installs from the network, so it is not CI's (CLAUDE.md
 // keeps CI offline); run it by hand with `npm run smoke`.
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,7 +91,10 @@ console.log(`${entries.length} entries, all under dist/`);
 
 step(`npm install <tarball> ${CESIUM} vite`);
 const app = join(work, 'app');
-run('mkdir', ['-p', app]);
+// `mkdirSync`, not a spawned `mkdir`: on Windows that name is a `cmd.exe`
+// builtin rather than an executable, so spawning it fails with ENOENT before
+// the smoke reaches anything it is meant to judge.
+mkdirSync(app, { recursive: true });
 writeFileSync(
   join(app, 'package.json'),
   JSON.stringify({ name: 'copc-smoke-consumer', private: true, type: 'module' }, null, 2),

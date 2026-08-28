@@ -1,12 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { encodeHierarchyPage } from './hierarchy-page.js';
+import { NO_STATS } from './fake-reader.js';
+import { FILE_URL, fixtureBytes as load, TOTAL_BYTES } from './fixtures.js';
+import { settleWith } from './settled.js';
 import { openCopc } from '../src/copc/index.js';
 import type { ByteRange, RangeReader } from '../src/range/index.js';
-
-const load = (name: string): Uint8Array =>
-  new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url))));
 
 const SLICES: readonly { offset: number; bytes: Uint8Array }[] = [
   { offset: 0, bytes: load('autzen-head.bin') },
@@ -14,11 +12,15 @@ const SLICES: readonly { offset: number; bytes: Uint8Array }[] = [
   { offset: 81_114_146, bytes: load('autzen-root-hierarchy.bin') },
 ];
 
-/** Serves the pinned slices at their real file offsets, and refuses anything else. */
+/**
+ * Serves the pinned slices at their real file offsets, and refuses anything
+ * else. Not `bufferReader`, which serves one buffer: `openCopc` reads three
+ * ranges megabytes apart, and each has to come from its own slice.
+ */
 function autzenReader() {
   const reads: ByteRange[] = [];
   const reader: RangeReader = {
-    url: 'https://host/autzen.copc.laz',
+    url: FILE_URL,
     read: (range) => {
       reads.push(range);
       const slice = SLICES.find(
@@ -32,11 +34,11 @@ function autzenReader() {
       const start = range.offset - slice.offset;
       return Promise.resolve({
         bytes: slice.bytes.slice(start, start + range.length).buffer as ArrayBuffer,
-        totalBytes: 81_123_042,
+        totalBytes: TOTAL_BYTES,
       });
     },
     readMany: () => Promise.reject(new Error('not used here')),
-    stats: () => ({ requests: 0, retries: 0, bytesRequested: 0, bytesWasted: 0, requestsSaved: 0 }),
+    stats: () => NO_STATS,
   };
   return { reader, reads };
 }
@@ -121,12 +123,44 @@ describe('openCopc', () => {
 
     await expect(failure).rejects.toMatchObject({ code: 'malformed-hierarchy' });
     await expect(failure).rejects.toThrow('root hierarchy page with a byte length of 0');
-    // The read that would ask for the (now nonsensical) root page never
-    // happens: openCopc refuses before it is ever built.
-    expect(reads).toEqual([
-      { offset: 0, length: 589 },
-      { offset: 375, length: 1361 },
-    ]);
+    // Nothing past the header is read at all. The refusal only needs the info
+    // VLR, which read 1 already carried, so it is made before either of the
+    // two reads that follow is issued — they now go out together, and gating
+    // this on one of them would have cost a request to learn nothing.
+    expect(reads).toEqual([{ offset: 0, length: 589 }]);
+  });
+
+  // The saving is a round trip on the one path `fromUrl` cannot return
+  // without, so it is worth pinning as behaviour rather than leaving to a
+  // reading of the source. Both dependent reads are held here: sequential code
+  // could only ever have started the first of them.
+  it('starts the VLR and hierarchy reads together, not one after the other', async () => {
+    const { reader } = autzenReader();
+    const started: number[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gated: RangeReader = {
+      ...reader,
+      read: async (range, signal) => {
+        started.push(range.offset);
+        // Read 1 answers immediately — the other two depend on it — while
+        // both of its dependents are held until this test lets them go.
+        if (range.offset !== 0) {
+          await held;
+        }
+        return reader.read(range, signal);
+      },
+    };
+
+    const opening = openCopc(gated);
+
+    expect(await settleWith(opening)).toEqual({ state: 'pending' });
+    expect(started).toEqual([0, 375, 81_114_146]);
+
+    release();
+    await expect(opening).resolves.toMatchObject({ totalBytes: 81_123_042 });
   });
 
   // The bound readHierarchyPage applies is only as good as the number this
@@ -249,20 +283,100 @@ describe('openCopc', () => {
   // Each of the three readers has this test for its own single read. The
   // signal has to survive every hop, and only a reader that sees all three
   // reads can say so.
-  it('passes the abort signal to every read', async () => {
+  it('gives every read a signal, and lets the caller abort all three', async () => {
     const controller = new AbortController();
     const { reader } = autzenReader();
-    const signals: (AbortSignal | undefined)[] = [];
+    const seen: (AbortSignal | undefined)[] = [];
     const watched: RangeReader = {
       ...reader,
-      read: (range, signal) => {
-        signals.push(signal);
+      read: async (range, signal) => {
+        seen.push(signal);
+        if (range.offset === 0) {
+          return reader.read(range, signal);
+        }
+        // Reads 2 and 3 stay in flight, so the caller's abort has something
+        // to reach.
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
         return reader.read(range, signal);
       },
     };
 
-    await openCopc(watched, controller.signal);
+    const opening = openCopc(watched, controller.signal);
+    expect(await settleWith(opening)).toEqual({ state: 'pending' });
 
-    expect(signals).toEqual([controller.signal, controller.signal, controller.signal]);
+    // Read 1 is handed the caller's own signal. Reads 2 and 3 share one
+    // `openCopc` owns, so that either one's failure can end the other — and
+    // the caller's abort still has to reach both of them through it.
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toBe(controller.signal);
+    expect(seen[1]).toBe(seen[2]);
+    expect(seen[1]).not.toBe(controller.signal);
+
+    controller.abort();
+    await expect(opening).rejects.toBe(controller.signal.reason);
+  });
+});
+
+// Two reads in flight at once means either one can be left behind by the
+// other. Both tests below hold one read open forever, so an implementation
+// that did not end it would fail them by timing out rather than by a diff.
+describe('when one of the two concurrent reads fails', () => {
+  /**
+   * A reader that serves read 1 from the fixtures, fails whichever of the
+   * other two starts at `failAt`, and leaves the remaining one hanging until
+   * something aborts it.
+   */
+  function readerFailingAt(failAt: number, failure: Error) {
+    const { reader } = autzenReader();
+    const aborted: number[] = [];
+    const gated: RangeReader = {
+      ...reader,
+      read: async (range, signal) => {
+        if (range.offset === 0) {
+          return reader.read(range, signal);
+        }
+        if (range.offset === failAt) {
+          throw failure;
+        }
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              aborted.push(range.offset);
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        });
+        return reader.read(range, signal);
+      },
+    };
+    return { reader: gated, aborted };
+  }
+
+  const VLR_REGION = 375;
+  const ROOT_PAGE = 81_114_146;
+
+  it('ends the root page read, and reports the VLR failure', async () => {
+    const failure = new Error('the VLR region could not be read');
+    const { reader, aborted } = readerFailingAt(VLR_REGION, failure);
+
+    await expect(openCopc(reader)).rejects.toBe(failure);
+
+    expect(aborted).toEqual([ROOT_PAGE]);
+  });
+
+  // The direction that needs the sentinel. The VLR read is ended by this
+  // function, so its rejection describes nothing about the file — reporting
+  // it would bury the root page failure that actually caused everything.
+  it('ends the VLR read, and reports the root page failure rather than the abort it caused', async () => {
+    const failure = new Error('the root hierarchy page could not be read');
+    const { reader, aborted } = readerFailingAt(ROOT_PAGE, failure);
+
+    await expect(openCopc(reader)).rejects.toBe(failure);
+
+    expect(aborted).toEqual([VLR_REGION]);
   });
 });
