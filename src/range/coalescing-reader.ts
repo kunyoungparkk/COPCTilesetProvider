@@ -75,12 +75,13 @@ function abortWhenAllAbort(
  * reads through `stats()` are the wrapped reader's own, which is what keeps
  * §7's waste ratio measured against what actually reached the network.
  *
- * Batching changes when a read's bytes arrive, never whose failure it
- * inherits. Each read takes its own group's outcome (`readMany` settles per
- * group) and answers its own signal the moment that signal fires, so sharing
- * a request with a tile that timed out, or with a tile still being waited on,
- * costs a caller nothing it would not have paid reading alone. What batching
- * does change is one report and one moment:
+ * Batching decides how the reads are grouped and nothing else a caller can
+ * observe. Each read is answered off its own group's promise the moment that
+ * group's request lands, fails only on its own group's failure, and answers
+ * its own signal as soon as that signal fires — so sharing a batch with a tile
+ * that is slow, that timed out, or that Cesium is still waiting on costs a
+ * caller nothing it would not have paid reading alone. What batching does
+ * change is one report and one moment:
  *
  * - **`totalBytes` is always `null`.** The file's size travels in
  *   `Content-Range`, which `readMany` does not surface per slice. Nothing on
@@ -149,15 +150,14 @@ export function createCoalescingReader(reader: RangeReader): RangeReader {
       detach.length = 0;
     };
 
-    // `readMany` is a `RangeReader` interface method, so nothing in its type
-    // stops an implementation from throwing synchronously. Inside a
-    // `queueMicrotask` callback such a throw reaches no caller at all — it
-    // surfaces as an unhandled error while every promise in this batch stays
-    // pending forever. Catching it turns that into each caller's own
-    // rejection.
-    let reads: Promise<readonly PromiseSettledResult<ArrayBuffer>[]>;
+    // `readMany` plans synchronously, so nothing stops an implementation from
+    // throwing here. Inside a `queueMicrotask` callback such a throw reaches
+    // no caller at all — it surfaces as an unhandled error while every promise
+    // in this batch stays pending forever. Catching it turns that into each
+    // caller's own rejection.
+    let answers: readonly Promise<ArrayBuffer>[];
     try {
-      reads = reader.readMany(ranges, signal);
+      answers = reader.readMany(ranges, signal);
     } catch (thrown) {
       releaseListeners();
       for (const read of batch) {
@@ -166,44 +166,30 @@ export function createCoalescingReader(reader: RangeReader): RangeReader {
       return;
     }
 
-    void reads
-      .then(
-        (results) => {
-          batch.forEach((read, index) => {
-            const result = results[index];
-            if (result === undefined) {
-              // `readMany` promises one settled result per request, in the
-              // caller's order. Failing the read says so; leaving it
-              // unsettled would hang the tile instead, with nothing naming
-              // the reader that broke the promise.
-              read.fail(
-                new Error(
-                  `range reader returned ${results.length} results for ${ranges.length} requests`,
-                ),
-              );
-              return;
-            }
-            // Each read takes its own group's outcome. A member the reader
-            // could not serve fails alone; a member whose bytes arrived is
-            // answered even if some other group in the same batch failed.
-            if (result.status === 'rejected') {
-              read.fail(result.reason);
-              return;
-            }
-            read.settle(result.value);
-          });
-        },
-        // `readMany` is documented never to reject, but it is an interface a
-        // caller can implement. One that rejects anyway has told us nothing
-        // about which request failed, so the only honest reading is that none
-        // of them were served.
-        (error: unknown) => {
-          for (const read of batch) {
-            read.fail(error);
-          }
-        },
-      )
-      .finally(releaseListeners);
+    // Each read is answered off its own promise, so it settles the moment its
+    // own request does. Nothing here waits for the batch: a read whose bytes
+    // arrived first is handed them first, and its budget and host slot go back
+    // then rather than when the last of its neighbours finishes.
+    batch.forEach((read, index) => {
+      const answer = answers[index];
+      if (answer === undefined) {
+        // `readMany` promises one promise per request, in the caller's order.
+        // Failing the read says so; leaving it unsettled would hang the tile
+        // instead, with nothing naming the reader that broke the promise.
+        read.fail(
+          new Error(
+            `range reader returned ${answers.length} answers for ${ranges.length} requests`,
+          ),
+        );
+        return;
+      }
+      answer.then(read.settle, read.fail);
+    });
+
+    // The listeners outlive the individual reads — the shared abort is only
+    // reached once every member has given up — so they come off when the last
+    // request has settled, not the first.
+    void Promise.allSettled(answers).then(releaseListeners);
   }
 
   return {

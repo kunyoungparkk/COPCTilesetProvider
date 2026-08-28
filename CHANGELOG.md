@@ -7,7 +7,21 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
-## [0.9.0] — 2026-08-28
+## [0.9.1] — 2026-08-28
+
+### Fixed
+
+- **A tile no longer waits for the other tiles requested in the same frame.**
+  0.9.0's merging handed every read in a batch its bytes only once *all* of
+  them had answered, so a frame was paced by its slowest request: a tile whose
+  response had already arrived stayed pending, and — because
+  `ScheduledRangeResource` returns a tile's byte budget and host slot when its
+  read settles — all six of §7's per-origin slots were held until the last
+  request landed, turning a rolling six into a lockstep wave. One request in a
+  retry wait stalled the tiles beside it that were already done. Each read is
+  now answered off its own request. `RangeReader.readMany` returns one promise
+  per request rather than a promise of results, which is what makes that
+  independence the default rather than something a caller has to arrange.
 
 The release that makes Decision 4's merge real. `0.9.0` rather than `0.4.0`
 because the API is where it is meant to be for `1.0`: nothing here adds or
@@ -156,7 +170,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...v0.9.0
 [0.3.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.1.1...v0.2.0

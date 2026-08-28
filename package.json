@@ -1,6 +1,6 @@
 {
   "name": "copc-tileset-provider",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Stream static COPC point clouds into CesiumJS with no pre-tiling step.",
   "keywords": [
     "copc",

@@ -58,7 +58,9 @@ export function bufferReader(
         totalBytes,
       });
     },
-    readMany: () => Promise.reject(new Error('this fake reader serves one range at a time')),
+    readMany: () => {
+      throw new Error('this fake reader serves one range at a time');
+    },
     stats: () => NO_STATS,
   };
 }

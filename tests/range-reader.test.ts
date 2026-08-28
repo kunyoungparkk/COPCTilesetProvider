@@ -307,35 +307,26 @@ describe('retry policy', () => {
 });
 
 /**
- * The buffer `readMany` settled request `index` with, or a failure naming what
- * it settled with instead.
+ * The promise `readMany` returned for request `index`.
  *
- * `readMany` never rejects — a request's outcome is its own group's — so a
- * test that wants the bytes has to say so, and one that gets a rejection
- * instead should read why rather than `undefined is not a function`.
+ * `readMany` hands back one promise per request, so a test asserts on the one
+ * it means rather than on a collection — and a reader that returned too few
+ * fails here, naming which request went unanswered, instead of somewhere
+ * downstream as `undefined`.
  */
-function fulfilled(
-  results: readonly PromiseSettledResult<ArrayBuffer>[],
-  index: number,
-): ArrayBuffer {
-  const result = results[index];
-  if (result?.status !== 'fulfilled') {
-    throw new Error(`request ${index} did not settle with bytes: ${JSON.stringify(result)}`);
+function answer(answers: readonly Promise<ArrayBuffer>[], index: number): Promise<ArrayBuffer> {
+  const found = answers[index];
+  if (found === undefined) {
+    throw new Error(`readMany returned no promise for request ${index}`);
   }
-  return result.value;
+  return found;
 }
 
-/** The reason `readMany` settled request `index` with, or a failure if it succeeded. */
-function rejection(
-  results: readonly PromiseSettledResult<ArrayBuffer>[],
+/** The bytes `readMany` answered request `index` with. */
+const bytesOf = async (
+  answers: readonly Promise<ArrayBuffer>[],
   index: number,
-): unknown {
-  const result = results[index];
-  if (result?.status !== 'rejected') {
-    throw new Error(`request ${index} was expected to fail, and did not`);
-  }
-  return result.reason;
-}
+): Promise<Uint8Array> => new Uint8Array(await answer(answers, index));
 
 describe('readMany', () => {
   it('reads neighbouring ranges in one request and splits the result', async () => {
@@ -351,28 +342,28 @@ describe('readMany', () => {
     // alone is ~20% of the merged span, ten times the 2% production default
     // (OVERVIEW §7). That cap is coalesce.test.ts's job to pin; this test
     // only checks that a merged buffer gets sliced back apart correctly.
-    const results = await createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 }).readMany([
       { offset: 1000, length: 4 },
       { offset: 1006, length: 4 },
     ]);
 
     expect(calls).toEqual([{ url: FILE_URL, range: 'bytes=1000-1009' }]);
     expect(overruns.count).toBe(0);
-    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2, 3, 4]));
-    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([5, 6, 7, 8]));
+    expect(await bytesOf(answers, 0)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(await bytesOf(answers, 1)).toEqual(new Uint8Array([5, 6, 7, 8]));
   });
 
   it('returns buffers in the caller order even when the file order differs', async () => {
     const span = new Uint8Array([1, 2, 3, 4]).buffer;
     const { fetch } = stubFetch(partial(span, 'bytes 0-3/1000'));
 
-    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch }).readMany([
       { offset: 2, length: 2 },
       { offset: 0, length: 2 },
     ]);
 
-    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([3, 4]));
-    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([1, 2]));
+    expect(await bytesOf(answers, 0)).toEqual(new Uint8Array([3, 4]));
+    expect(await bytesOf(answers, 1)).toEqual(new Uint8Array([1, 2]));
   });
 
   it('issues one request per group when ranges are too far apart', async () => {
@@ -381,14 +372,15 @@ describe('readMany', () => {
       partial(new Uint8Array([3, 4]).buffer, 'bytes 8000000-8000001/9000000'),
     );
 
-    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch }).readMany([
       { offset: 0, length: 2 },
       { offset: 8_000_000, length: 2 },
     ]);
+    await Promise.all(answers);
 
     expect(calls).toHaveLength(2);
     expect(overruns.count).toBe(0);
-    expect(results).toHaveLength(2);
+    expect(answers).toHaveLength(2);
   });
 
   // maxGapBytes is a public option, so one fixture is read two ways: with an
@@ -409,13 +401,15 @@ describe('readMany', () => {
       partial(new ArrayBuffer(500), 'bytes 0-499/100000'),
       partial(new ArrayBuffer(492), 'bytes 508-999/100000'),
     );
-    await createRangeReader(FILE_URL, { fetch: split.fetch, maxGapBytes: 4 }).readMany(ranges);
+    await Promise.all(
+      createRangeReader(FILE_URL, { fetch: split.fetch, maxGapBytes: 4 }).readMany(ranges),
+    );
 
     expect(split.calls.map((call) => call.range)).toEqual(['bytes=0-499', 'bytes=508-999']);
     expect(split.overruns.count).toBe(0);
 
     const merged = stubFetch(partial(new ArrayBuffer(1000), 'bytes 0-999/100000'));
-    await createRangeReader(FILE_URL, { fetch: merged.fetch }).readMany(ranges);
+    await Promise.all(createRangeReader(FILE_URL, { fetch: merged.fetch }).readMany(ranges));
 
     expect(merged.calls.map((call) => call.range)).toEqual(['bytes=0-999']);
     expect(merged.overruns.count).toBe(0);
@@ -424,7 +418,7 @@ describe('readMany', () => {
   it('reads nothing for an empty request list', async () => {
     const { fetch, calls, overruns } = stubFetch();
 
-    expect(await createRangeReader(FILE_URL, { fetch }).readMany([])).toEqual([]);
+    expect(createRangeReader(FILE_URL, { fetch }).readMany([])).toEqual([]);
     expect(calls).toEqual([]);
     expect(overruns.count).toBe(0);
   });
@@ -437,7 +431,7 @@ describe('readMany', () => {
     // it these two ranges land in separate groups, and the second group's
     // fetch call races an unrelated stub-exhaustion error instead of
     // exercising the merged-read verification this test is named for.
-    const results = await createRangeReader(FILE_URL, {
+    const answers = createRangeReader(FILE_URL, {
       fetch,
       retryDelaysMs: [],
       maxWasteRatio: 1,
@@ -449,8 +443,8 @@ describe('readMany', () => {
     // One request served both, so both callers inherit its verdict — this is
     // the case where sharing a failure is right, and the test below is the
     // case where it is not.
-    expect(rejection(results, 0)).toMatchObject({ code: 'content-range-mismatch' });
-    expect(rejection(results, 1)).toMatchObject({ code: 'content-range-mismatch' });
+    await expect(answer(answers, 0)).rejects.toMatchObject({ code: 'content-range-mismatch' });
+    await expect(answer(answers, 1)).rejects.toMatchObject({ code: 'content-range-mismatch' });
   });
 
   // The reason readMany settles per request rather than rejecting as a whole.
@@ -467,14 +461,17 @@ describe('readMany', () => {
 
     // 8 MB apart, far outside the 256 KiB gap threshold (§7): two groups, two
     // requests, and the stub answers the first and refuses the second.
-    const results = await createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).readMany([
       { offset: 0, length: 2 },
       { offset: 8_000_000, length: 2 },
     ]);
 
+    expect(await bytesOf(answers, 0)).toEqual(new Uint8Array([1, 2]));
+    await expect(answer(answers, 1)).rejects.toMatchObject({
+      code: 'range-request-failed',
+      status: 404,
+    });
     expect(calls).toHaveLength(2);
-    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2]));
-    expect(rejection(results, 1)).toMatchObject({ code: 'range-request-failed', status: 404 });
   });
 
   // Every tile read on a frame where nothing merged arrives as a group of one
@@ -494,11 +491,9 @@ describe('readMany', () => {
         arrayBuffer: () => Promise.resolve(body),
       })) as unknown as typeof globalThis.fetch;
 
-    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
-      { offset: 0, length: 4 },
-    ]);
+    const answers = createRangeReader(FILE_URL, { fetch }).readMany([{ offset: 0, length: 4 }]);
 
-    expect(fulfilled(results, 0)).toBe(body);
+    expect(await answer(answers, 0)).toBe(body);
   });
 
   // The other half of the rule above: a merged response must be split into
@@ -509,13 +504,13 @@ describe('readMany', () => {
     const span = new Uint8Array([1, 2, 3, 4, 9, 9, 5, 6, 7, 8]).buffer;
     const { fetch } = stubFetch(partial(span, 'bytes 0-9/100000'));
 
-    const results = await createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 }).readMany([
       { offset: 0, length: 4 },
       { offset: 6, length: 4 },
     ]);
 
-    const first = fulfilled(results, 0);
-    const second = fulfilled(results, 1);
+    const first = await answer(answers, 0);
+    const second = await answer(answers, 1);
     expect(first).not.toBe(second);
     expect(first.byteLength).toBe(4);
     expect(second.byteLength).toBe(4);
@@ -535,14 +530,15 @@ describe('readMany', () => {
     // The second range starts inside the first: planCoalescedReads throws
     // rather than producing slices that would hand two callers overlapping
     // bytes (`tests/coalesce.test.ts` pins that throw directly).
-    const results = await createRangeReader(FILE_URL, { fetch }).readMany([
+    const answers = createRangeReader(FILE_URL, { fetch }).readMany([
       { offset: 0, length: 4 },
       { offset: 2, length: 2 },
     ]);
+    await Promise.all(answers);
 
     expect(calls.map((call) => call.range)).toEqual(['bytes=0-3', 'bytes=2-3']);
-    expect(new Uint8Array(fulfilled(results, 0))).toEqual(new Uint8Array([1, 2, 3, 4]));
-    expect(new Uint8Array(fulfilled(results, 1))).toEqual(new Uint8Array([3, 4]));
+    expect(await bytesOf(answers, 0)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(await bytesOf(answers, 1)).toEqual(new Uint8Array([3, 4]));
     // Nothing was merged, so nothing was saved.
     expect(createRangeReader(FILE_URL, { fetch }).stats().requestsSaved).toBe(0);
   });
@@ -584,10 +580,12 @@ describe('stats', () => {
     // to pin the threshold — that's coalesce.test.ts's job.
     const reader = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 });
 
-    await reader.readMany([
-      { offset: 0, length: 4 },
-      { offset: 6, length: 4 },
-    ]);
+    await Promise.all(
+      reader.readMany([
+        { offset: 0, length: 4 },
+        { offset: 6, length: 4 },
+      ]),
+    );
 
     const stats = reader.stats();
     expect(stats.requests).toBe(1);
@@ -608,15 +606,15 @@ describe('stats', () => {
     controller.abort();
     const reader = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 });
 
-    const results = await reader.readMany(
+    const answers = reader.readMany(
       [
         { offset: 0, length: 4 },
         { offset: 6, length: 4 },
       ],
       controller.signal,
     );
-    expect(rejection(results, 0)).toMatchObject({ name: 'AbortError' });
-    expect(rejection(results, 1)).toMatchObject({ name: 'AbortError' });
+    await expect(answer(answers, 0)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(answer(answers, 1)).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(calls).toEqual([]);
     expect(reader.stats()).toEqual({
@@ -642,10 +640,12 @@ describe('stats', () => {
       // default would split the pair instead of merging it.
       const reader = createRangeReader(FILE_URL, { fetch, maxWasteRatio: 1 });
 
-      const pending = reader.readMany([
-        { offset: 0, length: 4 },
-        { offset: 6, length: 4 },
-      ]);
+      const pending = Promise.all(
+        reader.readMany([
+          { offset: 0, length: 4 },
+          { offset: 6, length: 4 },
+        ]),
+      );
       await vi.advanceTimersByTimeAsync(500);
       await pending;
 
@@ -773,7 +773,7 @@ describe('cancellation', () => {
 
     // 8 MB apart, far outside the 256 KiB gap threshold (§7), so these are two
     // groups issuing two requests — which the started list below also pins.
-    const pending = createRangeReader(FILE_URL, { fetch }).readMany(
+    const answers = createRangeReader(FILE_URL, { fetch }).readMany(
       [
         { offset: 0, length: 2 },
         { offset: 8_000_000, length: 2 },
@@ -781,9 +781,8 @@ describe('cancellation', () => {
       controller.signal,
     );
     controller.abort();
-    const results = await pending;
-    expect(rejection(results, 0)).toMatchObject({ name: 'AbortError' });
-    expect(rejection(results, 1)).toMatchObject({ name: 'AbortError' });
+    await expect(answer(answers, 0)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(answer(answers, 1)).rejects.toMatchObject({ name: 'AbortError' });
 
     // Each group settles its own callers, so the results alone cannot tell a
     // cancelled sibling from an orphaned one left holding a connection open

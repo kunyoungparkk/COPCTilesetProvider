@@ -37,7 +37,9 @@ function autzenReader() {
         totalBytes: TOTAL_BYTES,
       });
     },
-    readMany: () => Promise.reject(new Error('not used here')),
+    readMany: () => {
+      throw new Error('not used here');
+    },
     stats: () => NO_STATS,
   };
   return { reader, reads };

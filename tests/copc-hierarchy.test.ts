@@ -325,10 +325,10 @@ describe('descriptors as byte ranges', () => {
       ...reader,
       readMany: (requests) => {
         asked.push(...requests);
-        return Promise.resolve([]);
+        return [];
       },
     };
-    await collecting.readMany(nodes);
+    collecting.readMany(nodes);
 
     expect(asked).toEqual([
       { key: { depth: 1, x: 0, y: 0, z: 0 }, offset: 900, length: 64, pointCount: 7 },

@@ -15,37 +15,33 @@ function fakeReader(overrides: Partial<RangeReader> = {}): RangeReader {
   return {
     url: FILE_URL,
     read: vi.fn(() => Promise.reject(new Error('a coalescing read must not reach reader.read'))),
-    readMany: vi.fn(() => Promise.reject(new Error('unexpected readMany in this test'))),
+    readMany: vi.fn((): readonly Promise<ArrayBuffer>[] => {
+      throw new Error('unexpected readMany in this test');
+    }),
     stats: vi.fn(() => ({ ...NO_STATS })),
     ...overrides,
   };
 }
 
-type Settled = readonly PromiseSettledResult<ArrayBuffer>[];
+type Answers = readonly Promise<ArrayBuffer>[];
 
 /** `readMany`'s answer for a request it served. */
-const gave = (value: ArrayBuffer): PromiseSettledResult<ArrayBuffer> => ({
-  status: 'fulfilled',
-  value,
-});
+const gave = (value: ArrayBuffer): Promise<ArrayBuffer> => Promise.resolve(value);
 
 /** `readMany`'s answer for a request whose own group failed. */
-const failed = (reason: unknown): PromiseSettledResult<ArrayBuffer> => ({
-  status: 'rejected',
-  reason,
-});
+const failed = (reason: unknown): Promise<ArrayBuffer> => Promise.reject(reason);
 
 /**
- * A `readMany` spy that never answers, so a test can inspect what was asked
- * before anything settles. Its parameters are declared rather than inferred:
- * `vi.fn(() => ...)` types its own `mock.calls` as an empty tuple, which makes
- * reading back the signal it was handed a type error.
+ * A `readMany` spy whose answers never settle, so a test can inspect what was
+ * asked before anything is answered. Its parameters are declared rather than
+ * inferred: `vi.fn(() => ...)` types its own `mock.calls` as an empty tuple,
+ * which makes reading back the signal it was handed a type error.
  */
 const capturingReadMany = (): ReturnType<
-  typeof vi.fn<(requests: readonly ByteRange[], signal?: AbortSignal) => Promise<Settled>>
+  typeof vi.fn<(requests: readonly ByteRange[], signal?: AbortSignal) => Answers>
 > =>
-  vi.fn(
-    (_requests: readonly ByteRange[], _signal?: AbortSignal) => new Promise<Settled>(() => {}),
+  vi.fn((requests: readonly ByteRange[], _signal?: AbortSignal): Answers =>
+    requests.map(() => new Promise<ArrayBuffer>(() => {})),
   );
 
 describe('reads issued in one tick', () => {
@@ -53,7 +49,7 @@ describe('reads issued in one tick', () => {
     const first = new Uint8Array([1]).buffer;
     const second = new Uint8Array([2]).buffer;
     const readMany = vi.fn((_requests: readonly ByteRange[]) =>
-      Promise.resolve([gave(first), gave(second)]),
+      [gave(first), gave(second)],
     );
     const reader = createCoalescingReader(fakeReader({ readMany }));
 
@@ -72,7 +68,7 @@ describe('reads issued in one tick', () => {
 
   it('are one batch per tick, not one batch forever', async () => {
     const readMany = vi.fn((requests: readonly ByteRange[]) =>
-      Promise.resolve(requests.map(() => gave(new ArrayBuffer(1)))),
+      requests.map(() => gave(new ArrayBuffer(1))),
     );
     const reader = createCoalescingReader(fakeReader({ readMany }));
 
@@ -87,7 +83,34 @@ describe('reads issued in one tick', () => {
 });
 
 describe('a batch that fails', () => {
-  // The whole reason readMany settles per request. A batch plans into as many
+  // A batch is a grouping decision, not a rendezvous. Waiting for the whole of
+  // it before answering anyone would pace every frame by its slowest request:
+  // `ScheduledRangeResource` returns each tile's byte budget and host slot in
+  // the `finally` of the read it awaits, so six tiles admitted together would
+  // hold §7's six slots per origin until the last of them landed — a lockstep
+  // wave instead of a rolling six — and one request in a retry wait (§7: 0.5s,
+  // then 2s) would stall the tiles beside it that had already arrived.
+  it('answers a read as soon as its own request lands, not when the batch does', async () => {
+    const early = new Uint8Array([1]).buffer;
+    let landLate!: (bytes: ArrayBuffer) => void;
+    const late = new Promise<ArrayBuffer>((resolve) => {
+      landLate = resolve;
+    });
+    const reader = createCoalescingReader(
+      fakeReader({ readMany: vi.fn(() => [gave(early), late]) }),
+    );
+
+    const first = reader.read({ offset: 0, length: 10 });
+    const second = reader.read({ offset: 8_000_000, length: 20 });
+
+    await expect(first).resolves.toEqual({ bytes: early, totalBytes: null });
+    expect(await settleWith(second)).toEqual({ state: 'pending' });
+
+    landLate(new Uint8Array([2]).buffer);
+    await expect(second).resolves.toMatchObject({ totalBytes: null });
+  });
+
+  // The whole reason readMany answers per request. A batch plans into as many
   // groups as the gap thresholds require, and a tile whose own group came back
   // must not inherit a different group's timeout: Cesium marks a failed tile
   // FAILED, a state `requestContent` never revisits, so that tile would stay
@@ -97,9 +120,7 @@ describe('a batch that fails', () => {
     const failure = new Error('the other group timed out');
     const reader = createCoalescingReader(
       fakeReader({
-        readMany: vi.fn((_requests: readonly ByteRange[]) =>
-          Promise.resolve([gave(bytes), failed(failure)]),
-        ),
+        readMany: vi.fn((_requests: readonly ByteRange[]) => [gave(bytes), failed(failure)]),
       }),
     );
 
@@ -110,28 +131,13 @@ describe('a batch that fails', () => {
     await expect(lost).rejects.toBe(failure);
   });
 
-  it('rejects every read when the reader rejects outright, naming nothing', async () => {
-    const failure = new Error('the merged request failed');
-    const reader = createCoalescingReader(
-      fakeReader({ readMany: vi.fn(() => Promise.reject(failure)) }),
-    );
-
-    const a = reader.read({ offset: 0, length: 10 });
-    const b = reader.read({ offset: 10, length: 20 });
-
-    // `readMany` is documented never to reject, but it is an interface a
-    // caller can implement. A rejection says nothing about which request
-    // failed, so none of them can be reported as served.
-    await expect(a).rejects.toBe(failure);
-    await expect(b).rejects.toBe(failure);
-  });
-
   // The flush runs inside `queueMicrotask`, where a synchronous throw reaches
   // no caller: it surfaces as an unhandled error and leaves every promise in
-  // the batch pending for good. `settleWith` is what tells that apart from a
-  // rejection — awaiting a promise that never settles is a test timeout with
-  // no diff to read.
-  it('rejects every read when readMany throws synchronously rather than rejecting', async () => {
+  // the batch pending for good. `readMany` plans synchronously, so this is the
+  // shape a reader that cannot plan at all fails in. `settleWith` is what
+  // tells it apart from a rejection — awaiting a promise that never settles is
+  // a test timeout with no diff to read.
+  it('rejects every read when readMany throws instead of planning', async () => {
     const failure = new Error('readMany threw synchronously');
     const reader = createCoalescingReader(
       fakeReader({
@@ -153,7 +159,7 @@ describe('a batch that fails', () => {
       // One result for two requests: a `RangeReader` breaking its own
       // one-result-per-request contract. Silently skipping the second would
       // hang that tile with nothing naming the cause.
-      fakeReader({ readMany: vi.fn(() => Promise.resolve([gave(new ArrayBuffer(1))])) }),
+      fakeReader({ readMany: vi.fn(() => [gave(new ArrayBuffer(1))]) }),
     );
 
     const a = reader.read({ offset: 0, length: 10 });
@@ -162,7 +168,7 @@ describe('a batch that fails', () => {
     expect(await settleWith(a)).toMatchObject({ state: 'fulfilled' });
     expect(await settleWith(b)).toMatchObject({
       state: 'rejected',
-      reason: expect.objectContaining({ message: 'range reader returned 1 results for 2 requests' }),
+      reason: expect.objectContaining({ message: 'range reader returned 1 answers for 2 requests' }),
     });
   });
 });
@@ -294,7 +300,7 @@ describe('cancelling a merged request', () => {
 describe('what the wrapper does not change', () => {
   it('delegates url, stats and readMany to the reader it wraps', async () => {
     const stats = { ...NO_STATS, requests: 7, requestsSaved: 3 };
-    const readMany = vi.fn(() => Promise.resolve([gave(new ArrayBuffer(1))]));
+    const readMany = vi.fn(() => [gave(new ArrayBuffer(1))]);
     const reader = createCoalescingReader(
       fakeReader({ stats: vi.fn(() => stats), readMany }),
     );
@@ -346,5 +352,39 @@ describe('through a real reader', () => {
 
     // The gap is zero here, so merging cost nothing and saved one trip.
     expect(reader.stats()).toMatchObject({ requests: 1, requestsSaved: 1, bytesWasted: 0 });
+  });
+
+  // The same independence as the wrapper-level test above, but through the
+  // real reader and a real plan — two ranges 8 MB apart, which the §7 gap
+  // threshold puts in separate groups and therefore separate requests.
+  it('answers the request that landed while its neighbour is still in flight', async () => {
+    let landSlow!: () => void;
+    const slow = new Promise<void>((resolve) => {
+      landSlow = resolve;
+    });
+    const fetch = (async (_input: unknown, init?: RequestInit) => {
+      const range = new Headers(init?.headers).get('range') ?? '';
+      const [, from, to] = /^bytes=(\d+)-(\d+)$/.exec(range) ?? [];
+      const start = Number(from);
+      const end = Number(to);
+      if (start !== 0) {
+        await slow;
+      }
+      return new Response(new Uint8Array(end - start + 1), {
+        status: 206,
+        headers: { 'content-range': `bytes ${start}-${end}/9000000` },
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const reader = createCoalescingReader(createRangeReader(FILE_URL, { fetch }));
+
+    const near = reader.read({ offset: 0, length: 4 });
+    const far = reader.read({ offset: 8_000_000, length: 4 });
+
+    await expect(near).resolves.toMatchObject({ totalBytes: null });
+    expect(await settleWith(far)).toEqual({ state: 'pending' });
+
+    landSlow();
+    await expect(far).resolves.toMatchObject({ totalBytes: null });
   });
 });

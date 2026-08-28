@@ -134,16 +134,23 @@ export interface RangeReader {
   /**
    * Reads several ranges, merging neighbours into shared requests.
    *
-   * One settled result per request, in the caller's order, whatever grouping
-   * the planner chose. **Never rejects**: a request's outcome is its own
-   * group's, and the grouping is this method's decision rather than the
-   * caller's, so one group's failure must not be reported as every caller's.
-   * A caller that wants all-or-nothing gets it by inspecting the results.
+   * One promise per request, in the caller's order, returned as soon as the
+   * requests have been planned rather than when any of them has answered.
+   * Each settles the moment its own group does — a request that shares no
+   * group with a slow one waits for nothing, and a group's failure reaches
+   * only the requests that were in it.
+   *
+   * Both halves of that matter, and for the same reason: how these requests
+   * were grouped is this method's decision, not the caller's, so no caller
+   * should be able to tell it was made. A caller wanting all-or-nothing has
+   * `Promise.all`; one wanting each answer as it lands has it by default.
+   * Every promise is the caller's to handle, as it would be if they had made
+   * the reads themselves.
    */
   readMany(
     requests: readonly ByteRange[],
     signal?: AbortSignal,
-  ): Promise<readonly PromiseSettledResult<ArrayBuffer>[]>;
+  ): readonly Promise<ArrayBuffer>[];
   /** A snapshot of the counters accumulated since this reader was created. */
   stats(): RangeStats;
 }
@@ -358,10 +365,10 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     }));
   }
 
-  async function readMany(
+  function readMany(
     requests: readonly ByteRange[],
     signal?: AbortSignal,
-  ): Promise<readonly PromiseSettledResult<ArrayBuffer>[]> {
+  ): readonly Promise<ArrayBuffer>[] {
     let groups: readonly CoalescedGroup[];
     try {
       groups = planCoalescedReads(requests, coalesceOptions);
@@ -369,60 +376,48 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
       groups = unmerged(requests);
     }
 
-    const results = new Array<PromiseSettledResult<ArrayBuffer>>(requests.length);
+    const answers = new Array<Promise<ArrayBuffer>>(requests.length);
 
-    // Groups run concurrently on purpose. Coalescing exists to remove round
-    // trips, and serialising what is left would give the latency back. Bounding
-    // how many run at once is admission control's job (Decision 5), and this
-    // reader only ever sees ranges the budget already approved.
-    await Promise.all(
-      groups.map(async (group) => {
-        const wantedBytes = group.slices.reduce((total, slice) => total + slice.length, 0);
-        try {
-          const { bytes } = await read(group.span, signal, wantedBytes);
-          // Counted here rather than when the group was planned: a merge whose
-          // request never went out, or never came back, saved no round trip.
-          counters.requestsSaved += group.slices.length - 1;
+    // Every group is issued here and awaited nowhere. Groups run concurrently
+    // because coalescing exists to remove round trips and serialising what is
+    // left would give the latency back — and each request is answered off its
+    // own group's promise rather than off all of them, so a caller sharing a
+    // batch with a slow request, or with one that fails, is not made to share
+    // its fate. Bounding how many run at once is admission control's job
+    // (Decision 5); this reader only ever sees ranges the budget approved.
+    for (const group of groups) {
+      const wantedBytes = group.slices.reduce((total, slice) => total + slice.length, 0);
+      const span = read(group.span, signal, wantedBytes).then(({ bytes }) => {
+        // Counted on the way through rather than when the group was planned: a
+        // merge whose request never went out, or never came back, saved no
+        // round trip.
+        counters.requestsSaved += group.slices.length - 1;
+        return bytes;
+      });
 
-          const only = group.slices.length === 1 ? group.slices[0] : undefined;
-          if (only !== undefined && only.offset === 0 && only.length === bytes.byteLength) {
-            // A group of one covering its whole span merged with nothing, and
-            // this response holds exactly what its single caller asked for.
-            // Slicing it would allocate and copy the chunk a second time for
-            // no one — and every tile read on a frame where nothing merged
-            // takes this path, so that copy would be the common case rather
-            // than the exception. Handing the buffer over is safe because
-            // nothing else holds it: it comes from this response alone, and
-            // goes to one caller, which is free to transfer it to a Worker.
-            results[only.index] = { status: 'fulfilled', value: bytes };
-          } else {
-            // A merged span, where each caller must get a buffer of its own:
-            // they are handed to different tiles, and transferring one to a
-            // Worker detaches it — which would take the others' bytes with it
-            // if they were views on one buffer.
-            for (const slice of group.slices) {
-              results[slice.index] = {
-                status: 'fulfilled',
-                value: bytes.slice(slice.offset, slice.offset + slice.length),
-              };
-            }
-          }
-        } catch (reason: unknown) {
-          // This group's callers, and nobody else's. A frame's reads routinely
-          // plan into several groups — a hierarchy page sits megabytes from
-          // any point chunk — so `Promise.all`'s all-or-nothing rejection
-          // would report one request's timeout as every request's failure.
-          // For a tile that costs everything: Cesium marks a failed tile
-          // FAILED, which `requestContent` never revisits, so a tile whose own
-          // bytes arrived would be blank until the page is reloaded.
-          for (const slice of group.slices) {
-            results[slice.index] = { status: 'rejected', reason };
-          }
-        }
-      }),
-    );
+      for (const slice of group.slices) {
+        answers[slice.index] = span.then((bytes) =>
+          // A group of one covering its whole span merged with nothing, and
+          // this response holds exactly what its single caller asked for.
+          // Slicing it would allocate and copy the chunk a second time for no
+          // one — and every tile read on a frame where nothing merged takes
+          // this path, so that copy would be the common case rather than the
+          // exception. Handing the buffer over is safe because nothing else
+          // holds it: it comes from this response alone and goes to one
+          // caller, which is free to transfer it to a Worker.
+          //
+          // A merged span gives each caller a buffer of its own instead. They
+          // are handed to different tiles, and transferring one to a Worker
+          // detaches it — which would take its neighbours' bytes with it if
+          // they were views on one buffer.
+          group.slices.length === 1 && slice.offset === 0 && slice.length === bytes.byteLength
+            ? bytes
+            : bytes.slice(slice.offset, slice.offset + slice.length),
+        );
+      }
+    }
 
-    return results;
+    return answers;
   }
 
   function stats(): RangeStats {
