@@ -21,14 +21,15 @@ other end verifiable did.
   path moved. 1.145 reworks clipping polygons and adds a height-reference
   guard, and every assertion in `tests/cesium-contract.test.ts` holds against
   it unaltered, `Core/Resource.js` byte for byte unchanged from 1.144.
-- **Documented:** a pinned `cesium` older than 1.145 no longer builds, and no
-  version of this library can fix it. `cesium` is a re-export of
+- **Noted for the record:** a pinned `cesium` older than 1.145 does not build,
+  and no version of this library can fix it. `cesium` is a re-export of
   `@cesium/engine` and `@cesium/widgets` that names both with a caret, so npm
   pairs an old `cesium` with `@cesium/engine@26.3.0` — which dropped three
   clipping-polygon shaders that 1.142 through 1.144 still re-export.
   `npm install cesium@1.144.0 vite@8` in an empty project fails on that alone,
-  with nothing of this library installed. README's Limits carries the
-  `overrides` entry that fixes it.
+  with nothing of this library installed. The way out is to pin the pair that
+  shipped with the `cesium` you want — for 1.144.0,
+  `"overrides": { "@cesium/engine": "26.2.0", "@cesium/widgets": "16.1.1" }`.
 
 ### Changed
 

@@ -44,7 +44,7 @@ Nothing in it reads this repository's sources — the consumer app imports
 - **How npm resolves Cesium's own packages.** The consumer project pins
   `@cesium/engine` and `@cesium/widgets` to the versions that shipped with the
   `cesium` it installs, because npm left to itself pairs a `cesium` older than
-  1.145 with an engine that cannot build against it (README's Limits). Someone
+  1.145 with an engine that cannot build against it (CHANGELOG 0.10.1). Someone
   who installs an old Cesium without that pin meets a failure this smoke will
   not.
 - **A real-sized node.** 47 points is the smallest thing that can light a
