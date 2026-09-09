@@ -31,7 +31,7 @@ viewer.camera.flyTo({ destination: provider.extent });
 npm install copc-tileset-provider cesium
 ```
 
-Cesium is a peer dependency, `>=1.142.0 <1.145.0`. Both ends of that range are
+Cesium is a peer dependency, `>=1.142.0 <1.146.0`. Both ends of that range are
 rendered in a real browser before it is widened.
 
 ## Quick start
@@ -193,6 +193,19 @@ when its platform is `browser`, plain Rollup only with
 `@rollup/plugin-node-resolve` set to `{ browser: true }`. Otherwise alias
 `laz-perf` to `laz-perf/lib/web/index.js`. Only the Vite path is measured — the
 publish smoke builds with it.
+
+**Pinning a Cesium older than 1.145 needs an `overrides` entry.** Not this
+library's doing, and it happens with `cesium` alone: the `cesium` package is a
+re-export of `@cesium/engine` and `@cesium/widgets` that names both with a
+caret, so npm pairs an old `cesium` with the newest engine — and
+`@cesium/engine@26.3.0` dropped three clipping-polygon shaders that `cesium`
+1.142 through 1.144 still re-export. `npm install cesium@1.144.0 vite@8` in an
+empty project fails to build on that alone. Install the newest Cesium, or pin
+the pair that shipped with the one you want — 1.144.0, here:
+
+```json
+{ "overrides": { "@cesium/engine": "26.2.0", "@cesium/widgets": "16.1.1" } }
+```
 
 Cesium 1.141 and earlier is not a choice: the `_runtimeContentCodec` slot this
 library installs onto arrived in 1.142, so on anything older the mechanism it

@@ -7,6 +7,37 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-09-09
+
+Cesium 1.145 arrived. Widening to it took no code change; keeping the range's
+other end verifiable did.
+
+### Added
+
+- Cesium 1.145 support. The peer range is `>=1.142.0 <1.146.0`, and both ends
+  are still rendered in a real browser before it is widened: 1.142.0 and
+  1.145.0 each put 47 points and 20 lit pixels on a globe whose control run —
+  same scene, same 60 frames, no provider — lights none. Nothing on the codec
+  path moved. 1.145 reworks clipping polygons and adds a height-reference
+  guard, and every assertion in `tests/cesium-contract.test.ts` holds against
+  it unaltered, `Core/Resource.js` byte for byte unchanged from 1.144.
+- **Documented:** a pinned `cesium` older than 1.145 no longer builds, and no
+  version of this library can fix it. `cesium` is a re-export of
+  `@cesium/engine` and `@cesium/widgets` that names both with a caret, so npm
+  pairs an old `cesium` with `@cesium/engine@26.3.0` — which dropped three
+  clipping-polygon shaders that 1.142 through 1.144 still re-export.
+  `npm install cesium@1.144.0 vite@8` in an empty project fails on that alone,
+  with nothing of this library installed. README's Limits carries the
+  `overrides` entry that fixes it.
+
+### Changed
+
+- The publish smoke installs `@cesium/engine` and `@cesium/widgets` at the
+  versions that shipped with the `cesium` it is asked for, via npm `overrides`.
+  Until it did, `SMOKE_CESIUM=1.142.0 npm run smoke` died in the consumer's
+  Vite build for the upstream reason above, so the range's floor could not be
+  rendered at all. Its default is now 1.145.0.
+
 ## [0.10.0] — 2026-08-28
 
 The release that lets the streaming rate off its leash. 0.9.0 made merging
@@ -194,7 +225,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.3.0...v0.9.0

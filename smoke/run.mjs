@@ -19,7 +19,8 @@ const PORT = Number(process.env.SMOKE_PORT ?? 8933);
 // Which Cesium the consumer project installs. Overridable so the smoke can
 // verify both ends of the supported peer range, which is the only way an
 // expanded range means anything: `SMOKE_CESIUM=1.142.0 npm run smoke`.
-const CESIUM = `cesium@${process.env.SMOKE_CESIUM ?? '1.144.0'}`;
+const CESIUM_VERSION = process.env.SMOKE_CESIUM ?? '1.145.0';
+const CESIUM = `cesium@${CESIUM_VERSION}`;
 
 // `npm` and `npx` are `.cmd` shims on Windows: `execFileSync` cannot find
 // either by bare name, and Node refuses to spawn a `.cmd` at all without a
@@ -54,6 +55,29 @@ const run = (cmd, args, cwd) => {
 };
 
 const step = (message) => console.log(`\n── ${message}`);
+
+/**
+ * npm `overrides` pinning the two packages `cesium` re-exports to the versions
+ * that shipped with one of its releases.
+ *
+ * `cesium` declares `@cesium/engine` and `@cesium/widgets` with a caret, so npm
+ * is free to pair an old `cesium` with a newer engine — and that pairing does
+ * not build. Measured 2026-09-09: `npm install cesium@1.144.0 vite@8` in an
+ * empty project, with nothing of this library involved, fails with three
+ * MISSING_EXPORT errors, because engine 26.3.0 dropped clipping-polygon shaders
+ * that `cesium@1.144.0`'s own `Cesium.js` re-exports. Each caret's floor is the
+ * version released alongside that `cesium`, so pinning it installs the trio
+ * Cesium shipped together and leaves this smoke judging its own subject.
+ */
+function releaseTrio(version) {
+  const args = ['view', `cesium@${version}`, 'dependencies', '--json'];
+  const declared = JSON.parse(run('npm', args, REPO));
+  const floorOf = (name) => declared[name].replace(/^[\^~]/, '');
+  return {
+    '@cesium/engine': floorOf('@cesium/engine'),
+    '@cesium/widgets': floorOf('@cesium/widgets'),
+  };
+}
 
 const work = mkdtempSync(join(tmpdir(), 'copc-smoke-'));
 console.log(`smoke workspace: ${work}`);
@@ -97,7 +121,16 @@ const app = join(work, 'app');
 mkdirSync(app, { recursive: true });
 writeFileSync(
   join(app, 'package.json'),
-  JSON.stringify({ name: 'copc-smoke-consumer', private: true, type: 'module' }, null, 2),
+  JSON.stringify(
+    {
+      name: 'copc-smoke-consumer',
+      private: true,
+      type: 'module',
+      overrides: releaseTrio(CESIUM_VERSION),
+    },
+    null,
+    2,
+  ),
 );
 run('npm', ['install', tarball, CESIUM, 'vite@8', '--no-audit', '--no-fund'], app);
 

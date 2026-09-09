@@ -41,6 +41,12 @@ Nothing in it reads this repository's sources — the consumer app imports
 - **A strict CSP.** The default Worker comes from a `blob:` URL. A `worker-src`
   policy that forbids `blob:` blocks it, and the way out is `spawnWorker` or
   `copc-tileset-provider/worker`.
+- **How npm resolves Cesium's own packages.** The consumer project pins
+  `@cesium/engine` and `@cesium/widgets` to the versions that shipped with the
+  `cesium` it installs, because npm left to itself pairs a `cesium` older than
+  1.145 with an engine that cannot build against it (README's Limits). Someone
+  who installs an old Cesium without that pin meets a failure this smoke will
+  not.
 - **A real-sized node.** 47 points is the smallest thing that can light a
   pixel. Nothing here says what 61,201 points cost.
 - **Hierarchy page expansion.** The fixture fits in a single root page.
