@@ -132,7 +132,7 @@ Each point carries these batch-table properties:
 |---|---|---|
 | `Classification` | uint8 | LAS classification |
 | `Intensity` | uint16 | LAS intensity |
-| `GpsTime` | float64 | LAS GPS time |
+| `GpsTime` | float32 | LAS GPS time |
 | `ReturnNumber` | uint8 | LAS return number |
 | `NumberOfReturns` | uint8 | LAS number of returns |
 
@@ -140,8 +140,8 @@ Unstyled, points take the file's own colour. LAS point format 6 carries none,
 so such a file renders in Cesium's constant dark grey until a style gives it a
 colour — every property above is still there to style on.
 
-Picking goes through Cesium's own `scene.pick`. Every point carries a
-`BATCH_ID`, which is what lets a picked point resolve to the properties above.
+Picking resolves to a tile, not a single point: `scene.pick` cannot read one
+point's properties.
 
 ## Limits
 
@@ -163,7 +163,7 @@ it rather than omitting the option.
 **Content is PNTS, which is 3D Tiles 1.0 legacy**, superseded by glTF-based
 content in 3D Tiles 1.1. Chosen deliberately: a Worker can hand-encode PNTS — a
 header, a feature table, a binary body — where glTF has to be assembled, and
-its batch table is what gives Cesium's style language and picking. glTF is on
+its batch table is what gives Cesium's style language. glTF is on
 the roadmap after v1.
 
 **A strict `worker-src` CSP blocks the default Worker.** It is built from a

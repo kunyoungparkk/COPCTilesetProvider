@@ -117,8 +117,8 @@ const COLOUR_DIMENSIONS = ['Red', 'Green', 'Blue'];
 /**
  * A minimal `View` good enough for `encodePnts`'s own contract: only the
  * getters it actually reads, each returning one fixed value regardless of
- * point index. Good for testing the header/layout logic (byte counts,
- * alignment, `BATCH_ID` sizing) in isolation from any real LAS point format —
+ * point index. Good for testing the header/layout logic (byte counts and
+ * alignment) in isolation from any real LAS point format —
  * not a stand-in for a real decoded chunk, which the main `describe` above
  * already covers.
  *
@@ -262,20 +262,19 @@ describe('encodePnts', () => {
   });
 
   it('aligns every section boundary, and the tile itself, to 8 bytes', () => {
-    // One rule, not two (POSITION used to need only 4): featureTableBinaryStart,
-    // batchTableBinaryStart, and the tile's own declared byteLength all land
-    // on an 8-byte boundary. Measured on this 47-point fixture (with
-    // ReturnNumber and NumberOfReturns now in the batch table): the feature
-    // table JSON still needs real padding (224 raw -> 228 padded, +4 bytes),
-    // and the batch table binary still needs trailing zero bytes (611 raw ->
-    // 616, +5) to bring the whole tile (2024 bytes) to a multiple of 8.
+    // One rule, not two: featureTableBinaryStart, batchTableBinaryStart, and
+    // the tile's own declared byteLength all land on an 8-byte boundary.
+    // Measured on this 47-point fixture: the feature table JSON needs real
+    // padding (144 raw -> 148 padded, +4 bytes), and the batch table binary
+    // needs one trailing zero byte (423 raw -> 424) to bring the whole tile
+    // (1704 bytes) to a multiple of 8.
     //
-    // The batch table JSON boundary is not exercised by this fixture: adding
-    // the two new properties grew its raw length to 400 bytes, which already
-    // lands on an 8-byte boundary at this JSON's position, so padTrailing
-    // contributes 0 bytes here and a broken call at that site leaves this
-    // assertion green. The scan over point counts below is what holds that
-    // boundary, and it holds it without depending on any one count.
+    // The batch table JSON boundary is not exercised by this fixture: its raw
+    // length, 399 bytes, already lands on an 8-byte boundary at this JSON's
+    // position, so padTrailing contributes 0 bytes here and a broken call at
+    // that site leaves this assertion green. The scan over point counts below
+    // is what holds that boundary, and it holds it without depending on any
+    // one count.
     const parsed = readPntsHeader(buffer);
     expect(parsed.featureTableBinaryStart % 8).toBe(0);
     expect(parsed.batchTableBinaryStart % 8).toBe(0);
@@ -344,85 +343,78 @@ describe('encodePnts', () => {
       }
     });
 
-    it('gives every point its own BATCH_ID, sized UNSIGNED_BYTE for 47 points', () => {
-      // 47 <= 256, so the byte threshold applies (encodePnts's
-      // batchIdComponentType); the short/int branches this fixture cannot
-      // reach are pinned separately, below, against synthetic views.
-      expect(parsed.batchIds.componentDatatype).toBe(ComponentDatatype.UNSIGNED_BYTE);
-      expect(parsed.batchLength).toBe(pointCount);
-      const batchIds: Uint8Array = parsed.batchIds.typedArray;
-      for (let i = 0; i < pointCount; i++) {
-        expect(batchIds[i]).toBe(i);
-      }
+    it('carries no BATCH_ID, so Cesium reads the batch table as per-point attributes', () => {
+      // Model/PntsLoader.js forks on this: batch IDs make the batch table a
+      // property table, which Cesium styles on the CPU one point at a time,
+      // and their absence makes it property attributes, which it styles on
+      // the GPU. tests/cesium-contract.test.ts pins that fork against the
+      // installed Cesium.
+      expect(parsed.batchIds).toBeUndefined();
+      expect(parsed.batchLength).toBeUndefined();
+      expect(parsed.batchTableJson).toBeDefined();
     });
 
-    it('transcodes the batch table as a property table (GpsTime survives as FLOAT64) — and would narrow to float32 without BATCH_ID', async () => {
-      // PntsParser.parse alone never calls parseBatchTable (that only
-      // happens in Model/PntsLoader.js's makeStructuralMetadata), so driving
-      // it directly here is the only way to actually exercise the
-      // DOUBLE -> FLOAT64 transcoding this module's doc comment rests on,
-      // rather than re-asserting the componentType strings we wrote
-      // ourselves into parsed.batchTableJson.
+    it('transcodes every batch-table property to a GPU attribute of its own type, uncast', async () => {
+      // PntsParser.parse alone never calls parseBatchTable. PntsLoader's
+      // makeStructuralMetadata does, with parseAsPropertyAttributes set because
+      // the tile has no batch IDs, so driving it directly is what exercises the
+      // transcoding a style runs against, rather than re-reading the
+      // componentType strings this module wrote into batchTableJson.
       const { default: parseBatchTable } = await importEngineModule<{
-        default: (options: {
+        default: ((options: {
           count: number;
           batchTable: unknown;
           binaryBody?: Uint8Array;
           parseAsPropertyAttributes?: boolean;
           customAttributeOutput?: unknown[];
-        }) => any;
+        }) => any) & { _oneTimeWarning: (id: string, message: string) => void };
       }>('Scene/parseBatchTable.js');
 
-      // Positive control: BATCH_ID is present in every tile this module
-      // emits, and PntsLoader.js:559's own fork
-      // (`parseAsPropertyAttributes = !defined(parsedContent.batchIds)`)
-      // always calls parseBatchTable with parseAsPropertyAttributes: false
-      // on that path — drive that path directly on the parser's own output.
-      const table = parseBatchTable({
-        count: pointCount,
-        batchTable: parsed.batchTableJson,
-        binaryBody: parsed.batchTableBinary,
-        parseAsPropertyAttributes: false,
-      });
-      const batchTableClassName = '_batchTable'; // MetadataClass.BATCH_TABLE_CLASS_NAME
-      const classProperties = table.schema.classes[batchTableClassName].properties;
-      expect(classProperties.GpsTime.componentType).toBe('FLOAT64');
-      expect(classProperties.Intensity.componentType).toBe('UINT16');
-      expect(classProperties.Classification.componentType).toBe('UINT8');
-      expect(classProperties.ReturnNumber.componentType).toBe('UINT8');
-      expect(classProperties.NumberOfReturns.componentType).toBe('UINT8');
-
-      const propertyTable = table.getPropertyTable(0);
-      for (let i = 0; i < pointCount; i++) {
-        expect(propertyTable.getProperty(i, 'GpsTime')).toBe(getGpsTime(i));
-        expect(propertyTable.getProperty(i, 'Intensity')).toBe(getIntensity(i));
-        expect(propertyTable.getProperty(i, 'Classification')).toBe(getClassification(i));
-        expect(propertyTable.getProperty(i, 'ReturnNumber')).toBe(getReturnNumber(i));
-        expect(propertyTable.getProperty(i, 'NumberOfReturns')).toBe(getNumberOfReturns(i));
-      }
-
-      // Negative control: the exact same bytes, forced through the
-      // property-*attributes* path that a tile without BATCH_ID would take.
-      // This is the failure BATCH_ID's presence steers every shipped tile
-      // away from, demonstrated on our own bytes rather than assumed from
-      // reading parseBatchTable.js's source.
-      const customAttributeOutput: { name: string; componentDatatype: number; typedArray: Float32Array }[] =
+      // WebGL has no vertex attribute for INT, UNSIGNED_INT or DOUBLE, so
+      // parseBatchTable casts those to float32 and says so on the console. A
+      // GpsTime written as DOUBLE lands on the very same float32 values as one
+      // written as FLOAT and differs only by that warning, which is why the
+      // warning is what this listens for.
+      const warnings: string[] = [];
+      const warnOnce = parseBatchTable._oneTimeWarning;
+      parseBatchTable._oneTimeWarning = (id) => {
+        warnings.push(id);
+      };
+      const attributes: { name: string; componentDatatype: number; typedArray: ArrayLike<number> }[] =
         [];
-      parseBatchTable({
-        count: pointCount,
-        batchTable: parsed.batchTableJson,
-        binaryBody: parsed.batchTableBinary,
-        parseAsPropertyAttributes: true,
-        customAttributeOutput,
-      });
-      const gpsAttribute = customAttributeOutput.find((attribute) => attribute.name === '_GPSTIME');
-      expect(gpsAttribute).toBeDefined();
-      expect(gpsAttribute?.componentDatatype).toBe(ComponentDatatype.FLOAT);
-      // Cast to float32 and back loses precision — the cast value differs
-      // from the double it started as, and matches nothing but Math.fround
-      // of that double.
-      expect(gpsAttribute?.typedArray[0]).toBe(Math.fround(getGpsTime(0)));
-      expect(gpsAttribute?.typedArray[0]).not.toBe(getGpsTime(0));
+      try {
+        parseBatchTable({
+          count: pointCount,
+          batchTable: parsed.batchTableJson,
+          binaryBody: parsed.batchTableBinary,
+          parseAsPropertyAttributes: true,
+          customAttributeOutput: attributes,
+        });
+      } finally {
+        parseBatchTable._oneTimeWarning = warnOnce;
+      }
+      expect(warnings).toEqual([]);
+
+      // GpsTime is the one property float32 changes. This fixture stores GPS
+      // week time, about 245,000 s, where a float32 step is 1/64 s, so each
+      // value comes back as Math.fround of itself rather than exactly.
+      const expected: [string, string, (index: number) => number, (value: number) => number][] = [
+        ['_GPSTIME', 'FLOAT', getGpsTime, Math.fround],
+        ['_INTENSITY', 'UNSIGNED_SHORT', getIntensity, (value) => value],
+        ['_CLASSIFICATION', 'UNSIGNED_BYTE', getClassification, (value) => value],
+        ['_RETURNNUMBER', 'UNSIGNED_BYTE', getReturnNumber, (value) => value],
+        ['_NUMBEROFRETURNS', 'UNSIGNED_BYTE', getNumberOfReturns, (value) => value],
+      ];
+      expect(attributes.map((attribute) => attribute.name).sort()).toEqual(
+        expected.map(([name]) => name).sort(),
+      );
+      for (const [name, datatype, get, store] of expected) {
+        const attribute = attributes.find((candidate) => candidate.name === name);
+        expect(attribute?.componentDatatype).toBe(ComponentDatatype[datatype]);
+        for (let i = 0; i < pointCount; i++) {
+          expect(attribute?.typedArray[i]).toBe(store(get(i)));
+        }
+      }
     });
   });
 });
@@ -469,10 +461,12 @@ describe('encodePnts on synthetic views (counts a 47-point fixture cannot reach)
   });
 
   it('a 1-point tile still aligns to 8 bytes and PntsParser still reads it back', async () => {
-    // A count small enough that its own unpadded feature table JSON (170
-    // bytes, measured) needs a different amount of padding (2 bytes, to
-    // 172) than the real fixture above (4 bytes) — a second, independently
-    // adversarial case for the same 8-byte rule, not a repeat of it.
+    // A count small enough to pad the opposite JSON section from the real
+    // fixture above. Measured: its feature table JSON (92 bytes) needs no
+    // padding and its batch table JSON needs 2 (391 -> 393), where the
+    // fixture's feature table JSON needs 4 and its batch table JSON none — a
+    // second, independently adversarial case for the same 8-byte rule, not a
+    // repeat of it.
     const view = syntheticView(1);
     const placed: RelativePositions = {
       rtcCenter: [1, 2, 3],
@@ -493,34 +487,6 @@ describe('encodePnts on synthetic views (counts a 47-point fixture cannot reach)
     expect(result.pointsLength).toBe(1);
     expect(result.positions.typedArray[0]).toBe(10);
     expect(result.colors.typedArray[0]).toBe(1); // Red 256 >>> 8 === 1
-  });
-
-  // The 47-point fixture above never leaves UNSIGNED_BYTE (47 <= 256), so it
-  // cannot catch batchIdComponentType's threshold being wrong — mutating
-  // `count <= 256` to `count <= 257` leaves every test above green. These
-  // two pin the branches a real, larger COPC node would actually take.
-  it.each([
-    { count: 257, expected: 'UNSIGNED_SHORT' },
-    { count: 65537, expected: 'UNSIGNED_INT' },
-  ])('sizes BATCH_ID as $expected for $count points, with no id collision', async ({ count, expected }) => {
-    const view = syntheticView(count);
-    const placed: RelativePositions = { rtcCenter: [1, 2, 3], positions: new Float32Array(count * 3) };
-
-    const buffer = encodePnts(view, placed);
-
-    const { ComponentDatatype } = (await import('cesium')) as unknown as {
-      ComponentDatatype: Record<string, number>;
-    };
-    const { default: PntsParser } = await importEngineModule<{
-      default: { parse: (buffer: ArrayBuffer) => any };
-    }>('Scene/PntsParser.js');
-    const result = PntsParser.parse(buffer);
-
-    expect(result.batchIds.componentDatatype).toBe(ComponentDatatype[expected]);
-    // The actual harm a wrong threshold causes: two points sharing a batch
-    // id, not merely "the wrong type name" — checked directly rather than
-    // only checking the label.
-    expect(new Set(result.batchIds.typedArray).size).toBe(count);
   });
 });
 
@@ -571,7 +537,7 @@ describe('encodePnts on a real format-6 chunk (SoFi, decoded end to end)', () =>
     expect(result.pointsLength).toBe(SOFI_NODE_POINTS);
     expect(result.hasColors).toBe(false);
     expect(result.colors).toBeUndefined();
-    expect(new Set(result.batchIds.typedArray).size).toBe(SOFI_NODE_POINTS);
+    expect(result.positions.typedArray.length).toBe(SOFI_NODE_POINTS * 3);
   });
 
   it('carries the file\'s own batch-table values, not zeros', async () => {
@@ -588,27 +554,28 @@ describe('encodePnts on a real format-6 chunk (SoFi, decoded end to end)', () =>
         batchTable: unknown;
         binaryBody: unknown;
         parseAsPropertyAttributes: boolean;
+        customAttributeOutput: unknown[];
       }) => any;
     }>('Scene/parseBatchTable.js');
     const parsed = PntsParser.parse(buffer);
-    const structural = parseBatchTable({
+    const attributes: { name: string; typedArray: ArrayLike<number> }[] = [];
+    parseBatchTable({
       count: SOFI_NODE_POINTS,
       batchTable: parsed.batchTableJson,
       binaryBody: parsed.batchTableBinary,
-      parseAsPropertyAttributes: false,
+      parseAsPropertyAttributes: true,
+      customAttributeOutput: attributes,
     });
-
-    const table = structural.propertyTables[0];
     const read = (name: string, index: number) =>
-      table.getProperty(index, name) ?? table.getPropertyBySemantic?.(index, name);
+      attributes.find((attribute) => attribute.name === name)?.typedArray[index];
 
     const getClassification = view.getter('Classification');
     const getIntensity = view.getter('Intensity');
     const getGpsTime = view.getter('GpsTime');
     for (let i = 0; i < SOFI_NODE_POINTS; i++) {
-      expect(read('Classification', i)).toBe(getClassification(i));
-      expect(read('Intensity', i)).toBe(getIntensity(i));
-      expect(read('GpsTime', i)).toBe(getGpsTime(i));
+      expect(read('_CLASSIFICATION', i)).toBe(getClassification(i));
+      expect(read('_INTENSITY', i)).toBe(getIntensity(i));
+      expect(read('_GPSTIME', i)).toBe(Math.fround(getGpsTime(i)));
     }
     // Not all one value, or the loop above would pass on a constant tile.
     const gpsTimes = new Set(
@@ -645,7 +612,7 @@ describe('encodePnts on a view with no colour (LAS point format 6)', () => {
     expect(result.colors).toBeUndefined();
   });
 
-  it('still carries positions, batch ids and every batch-table property', async () => {
+  it('still carries positions and every batch-table property', async () => {
     // The half that a "just drop the colour" change could silently break:
     // RGB sat last in the feature table, so removing it moves no other
     // section's offset — and this is what proves that claim rather than
@@ -659,7 +626,6 @@ describe('encodePnts on a view with no colour (LAS point format 6)', () => {
 
     expect(result.pointsLength).toBe(4);
     expect(Array.from(result.positions.typedArray.slice(0, 3))).toEqual([0, 1, 2]);
-    expect(new Set(result.batchIds.typedArray).size).toBe(4);
 
     const properties = result.batchTableJson;
     expect(Object.keys(properties)).toEqual([
@@ -693,14 +659,13 @@ describe('encodePnts refuses a placed.positions that does not match view.pointCo
     // Every section size in the tile is derived from view.pointCount (47),
     // not from placed.positions.length (30, i.e. 10 points), so the tile
     // that comes out is internally consistent end to end — POINTS_LENGTH
-    // and BATCH_LENGTH both 47, every header byte-length field correct —
-    // and PntsParser.parse(buffer) does not throw either. It reads
-    // POSITION as 47 * 12 = 564 bytes starting at byte 0 of a feature-table
-    // binary sized for the real 308 (10 * 12 positions + 47 BATCH_ID + 47 *
-    // 3 RGB), so 256 of those bytes are read from BATCH_ID, RGB, and the
-    // start of the batch-table JSON that follows — measured directly:
-    // parsed.positions.typedArray has length 141 (47 * 3), and only its
-    // first 30 entries are the values this test actually wrote.
+    // 47, every header byte-length field correct — and
+    // PntsParser.parse(buffer) does not throw either. It reads POSITION as
+    // 47 * 12 = 564 bytes starting at byte 0 of a feature-table binary sized
+    // for the real 261 (10 * 12 positions + 47 * 3 RGB), so 444 of those
+    // bytes are read from RGB and the batch-table JSON that follows —
+    // measured directly: parsed.positions.typedArray has length 141 (47 * 3),
+    // and only its first 30 entries are the values this test actually wrote.
     const view = syntheticView(47);
     const placed: RelativePositions = {
       rtcCenter: [0, 0, 0],

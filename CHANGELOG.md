@@ -16,6 +16,17 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
   the volume, read tiles as near to a camera far above them and refined ones
   the view did not need. Heights are the cube's clamped into the header's
   measured z range, which still holds every point.
+- **Behaviour:** styles run on the GPU, and picking resolves to a tile rather
+  than to a point. Tiles no longer carry a `BATCH_ID`, which is what made
+  Cesium build an object per point as each tile loaded and evaluate every style
+  on the main thread, one point at a time. Measured on 1.6 million points on an
+  Apple M4 Pro: the first frame after a style change drops from 506 ms to
+  17 ms, and the JavaScript heap a load leaves behind from 102 MB to 18 MB.
+  `scene.pick` now returns the tile's content instead of the point and its
+  properties; `scene.pickPosition` is unaffected.
+- **Behaviour:** `GpsTime` is a float32, since WebGL has no double-precision
+  vertex attribute. GPS Week Time keeps a step of 1/16 s or finer; Adjusted
+  Standard GPS Time, near 3×10⁸ s, keeps a step of 32 s.
 
 ## [0.10.1] — 2026-09-09
 

@@ -93,21 +93,19 @@ Worker must not reach `src/index.ts` — the package root re-exports
 
 The batch table's property names and types — `Classification`, `Intensity`,
 `GpsTime`, `ReturnNumber`, `NumberOfReturns` — become a contract once a
-version ships with them: a caller's Cesium style strings and picking code
-get written against this exact set, so narrowing or removing one afterward
-breaks their code, not this library's. `PointSourceId` is deliberately
-excluded, on the shape of the bet rather than a guess at demand: adding a
-property later keeps every existing style string working, while removing or
-narrowing one does not — so omission is the reversible half. And `BATCH_ID`
-and the GPS time convention cannot be revisited separately: Cesium's
-`PntsLoader` builds a property *table* only when batch IDs are present,
-where a batch table's `DOUBLE` transcodes to `FLOAT64` and precision
-survives; without them it falls back to property *attributes*, where every
-value is cast to `Float32Array`. Which GPS time convention a file actually
-uses (LAS's `globalEncoding` bit chooses between GPS Week Time and Adjusted
-Standard GPS Time) is the file's decision, not this module's, so `GpsTime`
-has to stay a `DOUBLE` — and `BATCH_ID` present — for whichever convention a
-given file turns out to carry.
+version ships with them: a caller's Cesium style strings get written against
+this exact set, so narrowing or removing one afterward breaks their code, not
+this library's. `PointSourceId` is deliberately excluded, on the shape of the
+bet rather than a guess at demand: adding a property later keeps every
+existing style string working, while removing or narrowing one does not — so
+omission is the reversible half. Tiles carry no `BATCH_ID`, and that is what
+lets Cesium's `PntsLoader` turn the batch table into per-point vertex
+attributes a style compiles into the point shader, rather than building one
+feature object per point and styling each on the main thread. It costs
+picking a single point, and it makes `GpsTime` a float32, since WebGL has no
+double vertex attribute: a step of 1/16 s or finer for GPS Week Time, and
+32 s for Adjusted Standard GPS Time, whichever LAS's `globalEncoding` bit
+says a file carries.
 
 `pool.ts` holds no queue of its own beyond ports waiting for a task: the
 `Budget` lease *is* the queue (OVERVIEW §3 Decision 5's admitted/deferred/

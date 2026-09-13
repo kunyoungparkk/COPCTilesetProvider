@@ -113,10 +113,32 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
   float32 정밀도가 ~0.5m라 카메라 이동 시 지터가 생긴다. 타일 기준점(RTC_CENTER)
   상대값으로 저장하면 float32로도 mm 이하 정밀도 — 충분하다.
   (uint16 양자화는 §7의 보류 항목 — 전송량과 무관한 GPU 메모리 최적화)
-- **콘텐츠 포맷 = PNTS(3D Tiles 1.0) + batch table.** 채택 근거: Worker에서
+- **콘텐츠 포맷 = PNTS(3D Tiles 1.0) + batch table, BATCH_ID 없음.** 채택 근거: Worker에서
   손 인코딩이 단순하고(헤더 + feature table + 바이너리), batch table로 LAS 속성을
-  노출하면 Cesium 스타일 언어와 피킹이 그대로 작동한다(피킹에는 BATCH_ID 필수).
+  노출하면 Cesium 스타일 언어가 그대로 작동한다.
   3D Tiles 1.1 기준 legacy임을 README에 이 근거와 함께 명시. glTF 전환은 v1 이후 로드맵.
+  - BATCH_ID를 넣지 않는 이유: Cesium은 batch ID가 있는 PNTS를 property table로 읽어,
+    타일이 로드될 때 점마다 `Cesium3DTileFeature` 객체를 만들고 스타일을 메인 스레드에서
+    점 하나씩 평가한다 — 결정 3의 "메인 스레드는 조율만"과 정면으로 부딪친다. batch ID가
+    없으면 같은 batch table이 정점 속성이 되고, 스타일은 셰이더로 컴파일된다.
+    실측(2026-09-13, headless Chromium, Apple M4 Pro Metal, Cesium 1.145.0, 8타일 × 20만 점을
+    두 인코더로 같게 인코딩, 교차 5회 중앙값):
+
+    | | BATCH_ID 있음 | 없음 |
+    |---|---|---|
+    | 스타일 적용 첫 프레임 (color 5조건 + show) | 506 ms | 17 ms |
+    | 두 번째 스타일 첫 프레임 (show만) | 89 ms | 15 ms |
+    | 로드 후 JS 힙 증가 | 102 MB | 18 MB |
+    | Cesium 집계 메모리 (geometry + batch table) | 30.4 + 20.8 MB | 38.4 + 0 MB |
+    | tilesLoaded까지 | 148 ms | 110 ms |
+
+  - 대가 두 가지. 점 단위 피킹이 없다: `scene.pick`은 점이 아니라 그 점이 속한 타일의
+    content를 돌려준다(`scene.pickPosition`은 그대로 동작 — 같은 실측에서 둘 다 확인).
+    그리고 `GpsTime`은 float32다: WebGL에 double 정점 속성이 없어서다. `FLOAT`로 직접
+    써서 Cesium의 캐스팅 경고를 피한다. GPS Week Time(< 604,800 s)은 1/16 s 이하 간격이
+    남고(두 픽스처 모두 1/64 s), Adjusted Standard GPS Time(~3×10⁸ s)은 32 s 간격이다.
+  - 회귀 가드: `tests/cesium-contract.test.ts`가 PntsLoader의 batch ID 분기와 Model의 GPU
+    스타일 조건을 소스 문자열로 고정한다(각각 Cesium 소스를 변형해 실패하는지 확인함).
 - **빈 노드 불변식.** pointCount=0인 hierarchy 엔트리는 합성 JSON에서 content
   자체를 생략한다. 0점 PNTS는 어떤 경로로도 서빙 금지 — 0점 PNTS를 받은 타일은
   ready에 도달하지 못해 tilesLoaded가 영구 대기한다.

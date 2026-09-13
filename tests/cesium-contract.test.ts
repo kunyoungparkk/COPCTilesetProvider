@@ -41,6 +41,8 @@ function engineSource(path: string): string {
 const tile = engineSource('Scene/Cesium3DTile.js');
 const tileset = engineSource('Scene/Cesium3DTileset.js');
 const resource = engineSource('Core/Resource.js');
+const pntsLoader = engineSource('Scene/Model/PntsLoader.js');
+const model = engineSource('Scene/Model/Model.js');
 
 // Everything here was read off this version. Pinning it means a failure tells
 // you which of the two happened: Cesium moved, or the pin did.
@@ -162,5 +164,15 @@ describe('Cesium runtime content codec contract', () => {
     const failed = after.indexOf('tile._contentState = Cesium3DTileContentState.FAILED;');
     expect(failed).toBeGreaterThan(-1);
     expect(after.slice(0, failed)).not.toContain('request.cancelled');
+  });
+
+  // Why `src/worker/pnts.ts` writes no BATCH_ID. PntsLoader turns a PNTS batch
+  // table into per-point vertex attributes only when the tile has no batch
+  // IDs, and Model styles a point cloud in the shader only when its metadata
+  // arrived that way. With batch IDs, Cesium builds one feature object per
+  // point on load and evaluates every style on the CPU, one point at a time.
+  it('styles a point cloud on the GPU only when its tiles carry no batch IDs', () => {
+    expectSnippet(pntsLoader, 'const parseAsPropertyAttributes = !defined(parsedContent.batchIds);');
+    expectSnippet(model, 'if (isPnts && (!hasFeatureTable || hasPropertyAttributes)) {');
   });
 });

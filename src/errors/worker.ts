@@ -44,13 +44,13 @@ export class ZeroPointChunkError extends CopcTilesetError {
  * actually paired, and the failure that produces is worse than a throw:
  * measured directly, a `View` reporting 47 points handed a 10-point
  * `RelativePositions` writes a tile where every declared offset is
- * internally consistent — `POINTS_LENGTH`/`BATCH_LENGTH` both 47, header
- * byte-length fields all correct — because every section size is derived
- * from `view.pointCount`, not from how many positions actually exist.
- * Cesium's `PntsParser` reads `POSITION` as `47 * 12 = 564` bytes from a
- * feature-table binary sized for the real 308, straight through `BATCH_ID`
- * and `RGB` and into the batch-table JSON that follows — no throw, no
- * validation failure, just wrong values read from the wrong place.
+ * internally consistent — `POINTS_LENGTH` 47, header byte-length fields all
+ * correct — because every section size is derived from `view.pointCount`,
+ * not from how many positions actually exist. Cesium's `PntsParser` reads
+ * `POSITION` as `47 * 12 = 564` bytes from a feature-table binary sized for
+ * the real 261, straight through `RGB` and 303 bytes into the batch-table
+ * JSON that follows — no throw, no validation failure, just wrong values
+ * read from the wrong place.
  */
 export class PositionCountMismatchError extends CopcTilesetError {
   readonly code = 'position-count-mismatch';
