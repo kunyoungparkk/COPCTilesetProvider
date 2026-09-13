@@ -9,9 +9,8 @@ Stream static [COPC](https://copc.io/) point clouds into [CesiumJS](https://cesi
 
 A COPC file is a LAZ file whose points are already sorted into an octree. That
 means the parts you need can be read with HTTP Range requests from any static
-host — S3, nginx, GitHub Pages. This library maps that octree onto Cesium's own
-3D Tiles engine as it loads, so traversal, level of detail, request priority,
-caching, styling and picking all stay Cesium's.
+host — S3, nginx, GitHub Pages. This library streams that octree into Cesium as
+a 3D Tiles tileset, so it loads, caches and styles like any other.
 
 Point it at a URL and it renders:
 
@@ -31,8 +30,7 @@ viewer.camera.flyTo({ destination: provider.extent });
 npm install copc-tileset-provider cesium
 ```
 
-Cesium is a peer dependency, `>=1.142.0 <1.146.0`. Both ends of that range are
-rendered in a real browser before it is widened.
+Cesium is a peer dependency, `>=1.142.0 <1.146.0`.
 
 ## Quick start
 
@@ -77,11 +75,8 @@ once, before the file is opened:
 COPCTilesetProvider.registerCrs(2992, '<proj4 definition>');
 ```
 
-The library reads the EPSG code out of the file's WKT and looks it up. It does
-**not** feed the WKT to proj4 directly: proj4 either throws on some dialects
-(measured, on Autzen's compound WKT) or silently produces wrong coordinates when
-datum information is missing, and there is no way to tell which in advance. A
-registered definition is the only input somebody has vouched for.
+The library reads the EPSG code out of the file's WKT and uses the definition
+registered for it.
 
 An unregistered system fails with an error that names it and hands you the call
 to paste, including where to find the definition:
@@ -99,19 +94,14 @@ what it is given.
 
 ## Your server has to support Range requests
 
-Every read is an HTTP Range request, and every response is verified.
+Every read is an HTTP Range request.
 
 - **The host must serve `206`.** Most static hosts do; some CDNs and proxies
-  strip Range support on compressed responses. A `200` is refused rather than
-  accepted as a fallback — it is the whole file, which is what streaming exists
-  to avoid.
-- **Cross-origin, the check is weaker.** Browsers hand JavaScript only the
-  CORS-safelisted response headers, and `Content-Range` is not one of them
-  unless the server sends `Access-Control-Expose-Headers: Content-Range` —
-  which no public COPC dataset does. With the header, the range is checked
-  against it exactly; without it, on the status and the exact length of the
-  body, which cannot confirm *which* bytes came back. Send the header if you
-  control the host and want the stronger check.
+  strip Range support on compressed responses. A server that answers `200`
+  with the whole file is refused.
+- **If you host the file cross-origin**, also send
+  `Access-Control-Expose-Headers: Content-Range`. Files load without it, but
+  with it each response is checked against the exact byte range it claims.
 
 ## Styling and picking
 
@@ -153,12 +143,10 @@ until you pass the geoid separation at your dataset's location, in metres:
 await COPCTilesetProvider.fromUrl(url, { geoidHeight: -23.333 });
 ```
 
-One constant for the whole file, so it holds where the separation does not vary
-— a survey site, not a continent. Grid-based correction is out of scope for v1.
-A file that declares a vertical CRS and gets no `geoidHeight` loads anyway, with
-a console warning naming the code. That check cannot tell an already-ellipsoidal
-vertical CRS from a geoid-referenced one, so pass `geoidHeight: 0` to silence
-it rather than omitting the option.
+It is one constant for the whole file, so it suits a survey site, not a
+continent. A file that declares a vertical CRS but gets no `geoidHeight` loads
+with a console warning; pass `geoidHeight: 0` if its heights are already
+ellipsoidal.
 
 **Content is PNTS, which is 3D Tiles 1.0 legacy**, superseded by glTF-based
 content in 3D Tiles 1.1. Chosen deliberately: a Worker can hand-encode PNTS — a
@@ -166,10 +154,8 @@ header, a feature table, a binary body — where glTF has to be assembled, and
 its batch table is what gives Cesium's style language. glTF is on
 the roadmap after v1.
 
-**A strict `worker-src` CSP blocks the default Worker.** It is built from a
-bundle inlined into the library and loaded from a `blob:` URL, so nothing has
-to be served or configured — but a policy that forbids `blob:` refuses it, and
-the library cannot work around that. Supply your own Worker instead:
+**A strict `worker-src` CSP blocks the default Worker.** It loads from a
+`blob:` URL. If your policy forbids `blob:`, supply your own Worker:
 
 ```js
 // 1. Your own Worker module — the subpath installs itself when evaluated.
@@ -185,25 +171,16 @@ await COPCTilesetProvider.fromUrl(url, {
 });
 ```
 
-**A bundler that ignores `browser` fields will fail to build.** Your bundler
-resolves `laz-perf` itself, and what keeps it off laz-perf's Node build — which
-reaches for `require("fs")` — is that package's own
-`"browser": "lib/web/index.js"`. Vite and webpack honour it by default, esbuild
-when its platform is `browser`, plain Rollup only with
-`@rollup/plugin-node-resolve` set to `{ browser: true }`. Otherwise alias
-`laz-perf` to `laz-perf/lib/web/index.js`. Only the Vite path is measured — the
-publish smoke builds with it.
-
-Cesium 1.141 and earlier is not a choice: the `_runtimeContentCodec` slot this
-library installs onto arrived in 1.142, so on anything older the mechanism it
-depends on does not exist.
+**A bundler that ignores `browser` fields will fail to build.** Vite and webpack
+handle this by default, esbuild when its platform is `browser`, and plain Rollup
+only with `@rollup/plugin-node-resolve` set to `{ browser: true }`. Otherwise
+alias `laz-perf` to `laz-perf/lib/web/index.js`. Only Vite is tested.
 
 ## API
 
 ### `COPCTilesetProvider.fromUrl(url, options?)`
 
-Opens the file and returns a provider. Reads metadata and the root hierarchy
-page — three Range requests — before resolving.
+Opens the file and returns a provider, after reading only its metadata.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -211,7 +188,7 @@ page — three Range requests — before resolving.
 | `workerPoolSize` | `4` | How many Workers decode in parallel. |
 | `spawnWorker` | bundled Worker | Supply your own Worker, as a `WorkerPort`. See [Limits](#limits). |
 | `fetch` | `globalThis.fetch` | Every Range request goes through this. Use it to add auth headers, sign URLs, or route through a proxy. |
-| `signal` | — | Aborts the three reads `fromUrl` makes. Tile requests are cancelled by Cesium itself. |
+| `signal` | — | Aborts `fromUrl` while it is still opening the file. |
 | `geoidHeight` | — (HAE) | The geoid's separation from the WGS84 ellipsoid at this file's location, in metres, added to every height. Omit it for a file whose Z is already ellipsoidal. See [Limits](#limits). |
 
 ### Provider
@@ -219,14 +196,13 @@ page — three Range requests — before resolving.
 | Member | Type | What it is |
 |---|---|---|
 | `tileset` | `Cesium3DTileset` | The live tileset. Styling, events and traversal settings go here. |
-| `extent` | `Rectangle` | The file's measured extent, for camera framing. Not the inflated tile bounds. |
-| `stats()` | `ProviderStats` | Range counters, budget admissions, and registry size. |
-| `destroy()` | `void` | Releases the tileset, the Workers and every reservation. Idempotent. |
+| `extent` | `Rectangle` | The file's extent, for camera framing. |
+| `stats()` | `ProviderStats` | Request and loading counters, for diagnostics. |
+| `destroy()` | `void` | Releases the tileset and its Workers. Safe to call more than once. |
 
 ### `COPCTilesetProvider.registerCrs(code, proj4Definition)`
 
-Teaches this process one coordinate system. Static, because it has to be
-callable before any file is opened.
+Registers one coordinate system for every file opened afterwards.
 
 ### `browserPort(worker)`
 
@@ -234,8 +210,7 @@ Wraps a browser `Worker` as the `WorkerPort` that `spawnWorker` must return.
 
 ### `copc-tileset-provider/worker`
 
-The Worker realm's entry point. Importing it inside a Worker installs the
-message handler; it does not reach Cesium.
+Import it in your own Worker module to use that Worker through `spawnWorker`.
 
 ### Errors
 
