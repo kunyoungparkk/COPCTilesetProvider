@@ -7,6 +7,13 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-09-13
+
+Lighter tiles, on the network and in the browser. A minor rather than a patch,
+because a caller can observe every change below: a distant camera refines fewer
+tiles, a style no longer runs on the main thread, and picking resolves to a
+tile rather than to a point.
+
 ### Changed
 
 - **Behaviour:** a tile's bounding volume is now only as tall as the data, not
@@ -247,7 +254,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.0...v0.9.1
