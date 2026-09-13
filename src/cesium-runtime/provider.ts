@@ -381,6 +381,7 @@ export class COPCTilesetProvider {
       url,
       tokenBase,
       cube: file.info.cube,
+      header: file.header,
       rootGeometricError,
       transform,
     };

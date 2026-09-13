@@ -1,4 +1,4 @@
-import { Info } from 'copc';
+import { Info, Las } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
 import { bufferReader } from './fake-reader.js';
@@ -19,11 +19,13 @@ const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
 const DEGREES = 180 / Math.PI;
 
 const autzenCube = () => Info.parse(fixtureBytes('autzen-head.bin').subarray(429, 429 + 160)).cube;
+const autzenHeader = () => Las.Header.parse(fixtureBytes('autzen-head.bin').subarray(0, 375));
 
 const contextFor = async (transform: CrsTransform) => ({
   url: 'https://host/constructed.copc.laz',
   tokenBase: 'copc://a1b2c3/',
   cube: autzenCube(),
+  header: autzenHeader(),
   rootKey: { depth: 0, x: 0, y: 0, z: 0 },
   rootGeometricError: 88.709_699_234_182_7,
   transform,
@@ -306,7 +308,7 @@ describe('buildTileset', () => {
     const pinned = findByUri(json.root, 'copc://a1b2c3/n/4-2-1-0');
     expect(pinned).toBeDefined();
     const region = pinned?.boundingVolume.region;
-    // Derived directly from regionForKey(cube, {depth:4,x:2,y:1,z:0}, transform)
+    // Derived directly from regionForKey(cube, {depth:4,x:2,y:1,z:0}, transform, header)
     // against this fixture, printed to 15 decimal digits and rounded to 12 —
     // three more than the 9-digit toBeCloseTo checks below, so literal
     // rounding never eats a meaningful share of the 5e-10 tolerance.
@@ -315,7 +317,8 @@ describe('buildTileset', () => {
     expect((region?.[2] ?? 0) * DEGREES).toBeCloseTo(-123.071_702_268_119, 9);
     expect((region?.[3] ?? 0) * DEGREES).toBeCloseTo(44.051_389_804_437, 9);
     expect(region?.[4] ?? 0).toBeCloseTo(123.791_472, 6);
-    expect(region?.[5] ?? 0).toBeCloseTo(212.478_937_5, 6);
+    // The cube's top, 697.11 ft, is past the data's: 615.26 ft * 0.3048 = 187.531248.
+    expect(region?.[5] ?? 0).toBeCloseTo(187.531_248, 6);
   });
 
   it('uses absolute depth for a sub-page rooted below the file root', async () => {

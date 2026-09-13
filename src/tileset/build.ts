@@ -1,4 +1,4 @@
-import type { Bounds } from 'copc';
+import type { Bounds, Las } from 'copc';
 import type { HierarchyPage, NodeKey } from '../copc/index.js';
 import type { CrsTransform } from '../crs/index.js';
 import { geometricErrorAtDepth } from './geometric-error.js';
@@ -39,6 +39,11 @@ export interface TilesetContext {
   readonly tokenBase: string;
   /** `info.cube` — the octree root every node's cube is stepped from. */
   readonly cube: Bounds;
+  /**
+   * The LAS header's measured extent. Every point lies inside it, so every
+   * tile's heights are clipped to its z range (`regionForKey`).
+   */
+  readonly header: Pick<Las.Header, 'min' | 'max'>;
   /** The key this page is rooted at. `0-0-0-0` for the file's root page. */
   readonly rootKey: NodeKey;
   /** The whole file's root geometric error, from `measureRootGeometricError`. */
@@ -99,7 +104,9 @@ export function buildTileset(page: HierarchyPage, context: TilesetContext): Synt
     // outright) is what `exactOptionalPropertyTypes` itself actually refuses
     // (TS2375) — that error, not TS7023, is the one naming this shape.
     return {
-      boundingVolume: { region: regionForKey(context.cube, node.key, context.transform) },
+      boundingVolume: {
+        region: regionForKey(context.cube, node.key, context.transform, context.header),
+      },
       geometricError: geometricErrorAtDepth(context.rootGeometricError, node.key.depth),
       ...(isRoot ? { refine: 'ADD' as const } : {}),
       ...(content === undefined ? {} : { content }),

@@ -7,6 +7,16 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour:** a tile's bounding volume is now only as tall as the data, not
+  as tall as the octree cube COPC pads it into. That cube is as tall as the
+  data is broad, so over flat ground most of its height is air — 22 times the
+  data's own on Autzen — and Cesium, which refines by the camera's distance to
+  the volume, read tiles as near to a camera far above them and refined ones
+  the view did not need. Heights are the cube's clamped into the header's
+  measured z range, which still holds every point.
+
 ## [0.10.1] — 2026-09-09
 
 Cesium 1.145 arrived. Widening to it took no code change; keeping the range's

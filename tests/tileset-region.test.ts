@@ -28,7 +28,12 @@ const transformFor = async (): Promise<CrsTransform> => {
 
 describe('regionForKey on the real file', () => {
   it('places the root cube where the file says it is', async () => {
-    const region = regionForKey(autzenInfo().cube, { depth: 0, x: 0, y: 0, z: 0 }, await transformFor());
+    const region = regionForKey(
+      autzenInfo().cube,
+      { depth: 0, x: 0, y: 0, z: 0 },
+      await transformFor(),
+      autzenHeader(),
+    );
     const [west, south, east, north, minimumHeight, maximumHeight] = region;
 
     // Derivation: info.cube = [635577.79, 848882.15, 406.14, 640233.30,
@@ -43,10 +48,12 @@ describe('regionForKey on the real file', () => {
     expect(south * DEGREES).toBeCloseTo(44.049_718_474_631, 9);
     expect(east * DEGREES).toBeCloseTo(-123.057_284_529_060, 9);
     expect(north * DEGREES).toBeCloseTo(44.062_885_832_507, 9);
-    // Heights are the cube's own z, in metres: 406.14 ft * 0.3048 = 123.791472,
-    // 5061.65 ft * 0.3048 = 1542.790920.
+    // Heights are the header's measured z, in metres: 406.14 ft * 0.3048 =
+    // 123.791472, 615.26 ft * 0.3048 = 187.531248. The cube's own top, 5061.65
+    // ft (1542.790920 m), is padding, so a maximum there means the cube's
+    // heights were taken instead of the data's.
     expect(minimumHeight).toBeCloseTo(123.791_472, 6);
-    expect(maximumHeight).toBeCloseTo(1542.790_920, 6);
+    expect(maximumHeight).toBeCloseTo(187.531_248, 6);
   });
 
   it('contains the header corners, which it never saw', async () => {
@@ -55,6 +62,7 @@ describe('regionForKey on the real file', () => {
       autzenInfo().cube,
       { depth: 0, x: 0, y: 0, z: 0 },
       transform,
+      autzenHeader(),
     );
     const { min, max } = autzenHeader();
 
@@ -74,8 +82,9 @@ describe('regionForKey on the real file', () => {
 
   it('keeps a child inside its parent', async () => {
     const cube = autzenInfo().cube;
+    const header = autzenHeader();
     const transform = await transformFor();
-    const parent = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform);
+    const parent = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform, header);
 
     // Every child of the root, so the test cannot pass by picking a lucky one.
     for (let index = 0; index < 8; index++) {
@@ -83,6 +92,7 @@ describe('regionForKey on the real file', () => {
         cube,
         { depth: 1, x: index & 1, y: (index >> 1) & 1, z: (index >> 2) & 1 },
         transform,
+        header,
       );
 
       expect(child[0]).toBeGreaterThanOrEqual(parent[0]);
@@ -92,6 +102,26 @@ describe('regionForKey on the real file', () => {
       expect(child[4]).toBeGreaterThanOrEqual(parent[4]);
       expect(child[5]).toBeLessThanOrEqual(parent[5]);
     }
+  });
+
+  it('flattens a node lying wholly above the data onto its top', async () => {
+    // Key 1-0-0-1 is the root's upper z octant, 2733.895-5061.65 ft, and every
+    // point in the file lies at 406.14-615.26 ft. No point can be in it, though
+    // a zero-point entry can still name it. Both heights land on the data's
+    // top, 615.26 ft * 0.3048 = 187.531248 m: a region of zero thickness,
+    // rather than one whose minimum sits above its maximum, or one that keeps
+    // the empty cube's own heights. The containment test above cannot see the
+    // first of those: an inverted child still has a minimum above its
+    // parent's and a maximum below it.
+    const region = regionForKey(
+      autzenInfo().cube,
+      { depth: 1, x: 0, y: 0, z: 1 },
+      await transformFor(),
+      autzenHeader(),
+    );
+
+    expect(region[4]).toBeCloseTo(187.531_248, 6);
+    expect(region[5]).toBeCloseTo(187.531_248, 6);
   });
 
   it('does not confuse which axis a child bit selects', async () => {
@@ -105,23 +135,24 @@ describe('regionForKey on the real file', () => {
     // key has y = z = 0, making that swap a no-op on it; only childY's pins
     // catch it.
     const cube = autzenInfo().cube;
+    const header = autzenHeader();
     const transform = await transformFor();
 
-    const childX = regionForKey(cube, { depth: 1, x: 1, y: 0, z: 0 }, transform);
+    const childX = regionForKey(cube, { depth: 1, x: 1, y: 0, z: 0 }, transform, header);
     expect(childX[0] * DEGREES).toBeCloseTo(-123.066_412_447_771, 9);
     expect(childX[1] * DEGREES).toBeCloseTo(44.049_918_664_210, 9);
     expect(childX[2] * DEGREES).toBeCloseTo(-123.057_284_551_545, 9);
     expect(childX[3] * DEGREES).toBeCloseTo(44.056_501_829_639, 9);
     expect(childX[4]).toBeCloseTo(123.791_472, 6);
-    expect(childX[5]).toBeCloseTo(833.291_196, 6);
+    expect(childX[5]).toBeCloseTo(187.531_248, 6);
 
-    const childY = regionForKey(cube, { depth: 1, x: 0, y: 1, z: 0 }, transform);
+    const childY = regionForKey(cube, { depth: 1, x: 0, y: 1, z: 0 }, transform, header);
     expect(childY[0] * DEGREES).toBeCloseTo(-123.075_542_236_014, 9);
     expect(childY[1] * DEGREES).toBeCloseTo(44.056_102_440_129, 9);
     expect(childY[2] * DEGREES).toBeCloseTo(-123.066_412_432_824, 9);
     expect(childY[3] * DEGREES).toBeCloseTo(44.062_686_288_458, 9);
     expect(childY[4]).toBeCloseTo(123.791_472, 6);
-    expect(childY[5]).toBeCloseTo(833.291_196, 6);
+    expect(childY[5]).toBeCloseTo(187.531_248, 6);
   });
 
   it('is wider than its corners alone would be', async () => {
@@ -133,7 +164,7 @@ describe('regionForKey on the real file', () => {
     // corner each assertion compares against and why.
     const cube = autzenInfo().cube;
     const transform = await transformFor();
-    const region = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform);
+    const region = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform, autzenHeader());
 
     // The region's south bound is set by the south-west corner: the raw,
     // unpadded sample there is bit-identical to this corner projected
@@ -176,8 +207,14 @@ describe('regionForKey on a synthetic cube', () => {
     // Arbitrary; chosen only so the cube above crosses x = 1,312,335.958 ft.
     const centerX = 399_999.9999984 + 300_000;
     const cube: Bounds = [centerX - HALF, -HALF, 0, centerX + HALF, HALF, 100];
+    // Data filling the whole cube, so heights play no part: this test is about
+    // latitude.
+    const header: Pick<Las.Header, 'min' | 'max'> = {
+      min: [cube[0], cube[1], cube[2]],
+      max: [cube[3], cube[4], cube[5]],
+    };
 
-    const [, , , north] = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform);
+    const [, , , north] = regionForKey(cube, { depth: 0, x: 0, y: 0, z: 0 }, transform, header);
 
     // Measured: the correct region's north bound is 44.26896 deg; that exact
     // mutation's corners-only-but-still-padded box reaches only 44.26537 deg.

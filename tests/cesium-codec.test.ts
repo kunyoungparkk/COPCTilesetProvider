@@ -45,6 +45,7 @@ function tilesetContextFor(transform: CrsTransform): Omit<TilesetContext, 'rootK
     url: FILE_URL,
     tokenBase: TOKEN_BASE,
     cube: autzenCube(),
+    header: Las.Header.parse(fixture('autzen-head.bin').subarray(0, 375)),
     // Same value tests/tileset-build.test.ts pins for this fixture.
     rootGeometricError: 88.709_699_234_182_7,
     transform,

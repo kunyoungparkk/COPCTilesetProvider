@@ -1,4 +1,5 @@
 import { Bounds } from 'copc';
+import type { Las } from 'copc';
 import type { NodeKey } from '../copc/index.js';
 import type { CrsTransform } from '../crs/index.js';
 
@@ -46,8 +47,15 @@ export type Region = readonly [
  *
  * The cube comes from copc.js's own `Bounds.stepTo`, which is the subdivision
  * the file used, so there is no second implementation to disagree with it.
+ * `header` is the file's measured extent, and only its z range is read: it
+ * clips the cube's heights, for the reason given where they are computed.
  */
-export function regionForKey(cube: Bounds, key: NodeKey, transform: CrsTransform): Region {
+export function regionForKey(
+  cube: Bounds,
+  key: NodeKey,
+  transform: CrsTransform,
+  header: Pick<Las.Header, 'min' | 'max'>,
+): Region {
   const [minX, minY, minZ, maxX, maxY, maxZ] = Bounds.stepTo(cube, [
     key.depth,
     key.x,
@@ -99,11 +107,29 @@ export function regionForKey(cube: Bounds, key: NodeKey, transform: CrsTransform
     }
   }
 
+  // The heights are the cube's, clamped into the header's z range. COPC pads
+  // the octree into a cube as tall as the data is broad, so over flat ground
+  // most of that height is air: 22 times the data's own on the pinned file.
+  // Cesium's screen-space error grows as the camera's distance to this volume
+  // shrinks, and a volume reaching up into that air reads as near to a camera
+  // hovering far above the points, refining tiles the view does not need. The
+  // header records the extent of every point, the same measurement
+  // `measureRootGeometricError` takes, so the clamped volume still holds its
+  // tile's data.
+  //
+  // Each bound is clamped on its own rather than the two ranges intersected,
+  // so a node lying wholly outside the data (a zero-point entry can name one)
+  // still gets a minimum no higher than its maximum, and a child stays inside
+  // its parent.
+  //
   // Heights depend only on z: the transform scales it by the definition's
   // linear unit and leaves the horizontal pair to proj4, so the cube's own
   // corner is used rather than coordinates invented for the call.
-  const [, , minimumHeight] = transform.toWgs84(minX, minY, minZ);
-  const [, , maximumHeight] = transform.toWgs84(minX, minY, maxZ);
+  const [, , dataMinZ] = header.min;
+  const [, , dataMaxZ] = header.max;
+  const clampToData = (z: number): number => Math.min(Math.max(z, dataMinZ), dataMaxZ);
+  const [, , minimumHeight] = transform.toWgs84(minX, minY, clampToData(minZ));
+  const [, , maximumHeight] = transform.toWgs84(minX, minY, clampToData(maxZ));
 
   return [
     (west - longitudePadding) * RADIANS_PER_DEGREE,
