@@ -1,6 +1,6 @@
 // rolldown rather than rollup: TypeScript 7 does not expose the compiler API
 // `@rollup/plugin-typescript` needs, and rolldown strips types natively
-// through oxc. See the spec's §11 for the measurement. Vite 8 runs on rolldown
+// through oxc. OVERVIEW §5 records the measurement. Vite 8 runs on rolldown
 // too, so the demo and the library share one bundler.
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'rolldown';
@@ -12,9 +12,9 @@ const LAZ_PERF_WEB = fileURLToPath(
   new URL('./node_modules/laz-perf/lib/web/index.js', import.meta.url),
 );
 
-// Every declared dependency stays external in the library bundle (spec §3.1):
-// a consumer installs and dedupes them. Only the Worker is self-contained,
-// which is the whole point of it.
+// Every declared dependency stays external in the library bundle: a consumer
+// installs and dedupes them. Only the Worker is self-contained, which is the
+// whole point of it.
 const EXTERNAL = ['cesium', 'copc', 'proj4'];
 
 export default defineConfig([

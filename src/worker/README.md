@@ -30,9 +30,8 @@ them.
   `ToWorker` message into a pipeline call and a `FromWorker` reply.
   Deliberately free of any platform API, so it needs a bootstrap to become a
   real Worker. `tests/worker-entry-node.ts` is that bootstrap for
-  `node:worker_threads`; **no browser bootstrap exists yet** — that belongs
-  to the bundling sub-project, alongside the Rollup self-contained Worker
-  bundle OVERVIEW §5 calls for.
+  `node:worker_threads`, and `browser.ts` is the browser one that
+  `dist/worker.js` is built from (see Limits below).
 
 **Main-thread realm** — `pool.ts`: `createWorkerPool`, `WorkerPool`,
 `EncodeVerdict`, `EncodeRequest`, `WorkerPoolOptions`, `DEFAULT_POOL_SIZE`.

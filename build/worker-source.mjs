@@ -1,6 +1,6 @@
 // Injects the built Worker's text into the library bundle, so `fromUrl` can
 // make a Blob URL Worker without the consumer's bundler having to understand
-// any worker convention (spec §4).
+// any worker convention (OVERVIEW §5: a self-contained Worker bundle).
 import { readFileSync } from 'node:fs';
 
 const SPECIFIER = 'virtual:worker-source';

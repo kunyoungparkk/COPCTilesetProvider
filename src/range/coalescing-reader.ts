@@ -92,8 +92,8 @@ function abortWhenAllAbort(
  *   has given up — and, since the unit of that decision is the batch rather
  *   than the group, only once every tile in the batch has. A cancelled caller
  *   has already been answered by then; what continues is bytes nobody reads,
- *   bounded by what the budget admits in one frame (§7 caps concurrent
- *   requests per origin at 6).
+ *   bounded by what the budget admits in one frame (§7's per-origin cap on
+ *   concurrent tile reads).
  */
 export function createCoalescingReader(reader: RangeReader): RangeReader {
   let pending: PendingRead[] = [];
@@ -120,7 +120,7 @@ export function createCoalescingReader(reader: RangeReader): RangeReader {
     // Each read answers to its own signal, immediately, whatever happens to
     // the request it shares. This is the whole of what a caller sees of
     // cancellation, and it has to be prompt: `ScheduledRangeResource` releases
-    // the tile's byte budget and its host slot (§7 allows six per origin) in
+    // the tile's byte budget and its host slot (§7 caps them per origin) in
     // the `finally` of the read it is awaiting, so a cancelled tile that
     // stayed pending until the merged response landed would hold both for the
     // length of a transfer nobody was waiting on. The bytes still arrive for
