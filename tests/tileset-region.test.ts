@@ -155,6 +155,29 @@ describe('regionForKey on the real file', () => {
     expect(childY[5]).toBeCloseTo(187.531_248, 6);
   });
 
+  it('projects no point twice', async () => {
+    // A corner ends two edges and is the first or last sample on each, so a
+    // loop that projects at every use asks for the same point four times —
+    // measured on this node, 30 projections for 18 distinct points. This runs
+    // on the main thread for every node of every page. Two heights share the
+    // cube's minX/minY corner with the perimeter but differ in z, so the
+    // check is on the whole (x, y, z) triple.
+    const transform = await transformFor();
+    const asked: string[] = [];
+    const counting: CrsTransform = {
+      toWgs84: (x, y, z) => {
+        asked.push(`${x},${y},${z}`);
+        return transform.toWgs84(x, y, z);
+      },
+      toEcef: transform.toEcef,
+    };
+
+    regionForKey(autzenInfo().cube, { depth: 1, x: 1, y: 0, z: 0 }, counting, autzenHeader());
+
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked).size).toBe(asked.length);
+  });
+
   it('is wider than its corners alone would be', async () => {
     // Decision 6 samples the edges because a projection is nonlinear, so a
     // straight line between an edge's own endpoints can miss the curve

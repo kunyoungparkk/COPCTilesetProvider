@@ -63,11 +63,22 @@ export function regionForKey(
     key.z,
   ]);
 
+  // Each corner is projected once, here. A corner ends two edges and is the
+  // first or last sample on each, so projecting it at every use would repeat
+  // the same projection three more times. The perimeter then costs one
+  // projection per distinct point, 4(k - 1) of them (§7), which matters
+  // because this runs on the main thread for every node of every page.
+  const corner = (x: number, y: number) => ({ x, y, wgs84: transform.toWgs84(x, y, 0) });
+  const minXMinY = corner(minX, minY);
+  const maxXMinY = corner(maxX, minY);
+  const maxXMaxY = corner(maxX, maxY);
+  const minXMaxY = corner(minX, maxY);
+
   const edges = [
-    [[minX, minY], [maxX, minY]],
-    [[maxX, minY], [maxX, maxY]],
-    [[maxX, maxY], [minX, maxY]],
-    [[minX, maxY], [minX, minY]],
+    [minXMinY, maxXMinY],
+    [maxXMinY, maxXMaxY],
+    [maxXMaxY, minXMaxY],
+    [minXMaxY, minXMinY],
   ] as const;
 
   let west = Number.POSITIVE_INFINITY;
@@ -78,16 +89,21 @@ export function regionForKey(
   let latitudePadding = 0;
 
   for (const [from, to] of edges) {
-    const [fromLongitude, fromLatitude] = transform.toWgs84(from[0], from[1], 0);
-    const [toLongitude, toLatitude] = transform.toWgs84(to[0], to[1], 0);
+    const [fromLongitude, fromLatitude] = from.wgs84;
+    const [toLongitude, toLatitude] = to.wgs84;
 
     for (let sample = 0; sample < SAMPLES_PER_EDGE; sample++) {
       const along = sample / (SAMPLES_PER_EDGE - 1);
-      const [longitude, latitude] = transform.toWgs84(
-        from[0] + (to[0] - from[0]) * along,
-        from[1] + (to[1] - from[1]) * along,
-        0,
-      );
+      const [longitude, latitude] =
+        sample === 0
+          ? from.wgs84
+          : sample === SAMPLES_PER_EDGE - 1
+            ? to.wgs84
+            : transform.toWgs84(
+                from.x + (to.x - from.x) * along,
+                from.y + (to.y - from.y) * along,
+                0,
+              );
 
       west = Math.min(west, longitude);
       east = Math.max(east, longitude);
