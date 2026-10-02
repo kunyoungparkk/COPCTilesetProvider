@@ -6,7 +6,7 @@
     <title>copc-tileset-provider — live demo</title>
     <link
       rel="stylesheet"
-      href="https://cesium.com/downloads/cesiumjs/releases/1.145/Build/Cesium/Widgets/widgets.css"
+      href="https://cdn.jsdelivr.net/npm/cesium@1.146.0/Build/Cesium/Widgets/widgets.css"
     />
     <style>
       :root { color-scheme: dark; }
@@ -53,7 +53,7 @@
          such tag, so it has to be said. -->
     <script>
       window.CESIUM_BASE_URL =
-        'https://cesium.com/downloads/cesiumjs/releases/1.145/Build/Cesium/';
+        'https://cdn.jsdelivr.net/npm/cesium@1.146.0/Build/Cesium/';
     </script>
     <!-- Rewritten at deploy time from the CESIUM_ION_TOKEN repository secret
          (.github/workflows/pages.yml). Empty here on purpose: a Cesium ion
@@ -66,11 +66,14 @@
          and `?external=cesium` keeps it a bare import, so it resolves through
          this same entry: two copies of the engine would make `provider.tileset`
          a Cesium3DTileset from the wrong one, and `scene.primitives.add` fails
-         on a class identity check. -->
+         on a class identity check. Cesium comes from jsDelivr, which serves
+         the npm package itself: the bytes `npm install cesium` gives a user,
+         there as soon as a release is published. The stylesheet and
+         CESIUM_BASE_URL above name the same version and move with it. -->
     <script type="importmap">
       {
         "imports": {
-          "cesium": "https://cesium.com/downloads/cesiumjs/releases/1.145/Build/Cesium/index.js",
+          "cesium": "https://cdn.jsdelivr.net/npm/cesium@1.146.0/Build/Cesium/index.js",
           "copc-tileset-provider": "https://esm.sh/copc-tileset-provider@0.11.1?external=cesium"
         }
       }
