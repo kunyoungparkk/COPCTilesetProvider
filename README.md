@@ -30,7 +30,7 @@ viewer.camera.flyTo({ destination: provider.extent });
 npm install copc-tileset-provider cesium
 ```
 
-Cesium is a peer dependency, `>=1.142.0 <1.146.0`.
+Cesium is a peer dependency, `>=1.142.0 <1.147.0`.
 
 ## Quick start
 

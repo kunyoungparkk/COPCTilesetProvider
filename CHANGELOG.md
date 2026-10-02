@@ -7,6 +7,27 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+### Added
+
+- Cesium 1.146 support. The peer range is `>=1.142.0 <1.147.0`, and both ends
+  are still rendered in a real browser before it is widened: 1.142.0 and
+  1.146.0 each put 47 points and 20 lit pixels on a globe whose control run —
+  same scene, same 60 frames, no provider — lights none. Nothing on the codec
+  path moved. 1.146 moves Cesium's math and utility classes into a new
+  `@cesium/core` package, which rewrites the imports at the top of
+  `Cesium3DTile.js`, `Resource.js` and `PntsLoader.js` and nothing below them,
+  and every assertion in `tests/cesium-contract.test.ts` holds against it
+  unaltered. This library imports only from `cesium`, which re-exports the
+  moved classes from `@cesium/core` directly, so the deprecation warnings 1.146
+  attaches to the old `@cesium/engine` exports do not appear.
+- **Noted for the record:** the pairing problem 0.10.1 recorded for 1.144 now
+  reaches 1.145. npm pairs `cesium@1.145.0` with `@cesium/engine@26.4.0`, which
+  no longer exports 30 names that 1.145 re-exports, so
+  `npm install cesium@1.145.0 vite@8` in an empty project fails with 30
+  MISSING_EXPORT errors, with nothing of this library installed. Pinning the
+  pair that shipped with 1.145.0 builds again:
+  `"overrides": { "@cesium/engine": "26.3.0", "@cesium/widgets": "16.2.0" }`.
+
 ## [0.11.0] — 2026-09-13
 
 Lighter tiles, on the network and in the browser. A minor rather than a patch,

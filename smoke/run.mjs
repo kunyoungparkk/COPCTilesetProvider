@@ -19,7 +19,7 @@ const PORT = Number(process.env.SMOKE_PORT ?? 8933);
 // Which Cesium the consumer project installs. Overridable so the smoke can
 // verify both ends of the supported peer range, which is the only way an
 // expanded range means anything: `SMOKE_CESIUM=1.142.0 npm run smoke`.
-const CESIUM_VERSION = process.env.SMOKE_CESIUM ?? '1.145.0';
+const CESIUM_VERSION = process.env.SMOKE_CESIUM ?? '1.146.0';
 const CESIUM = `cesium@${CESIUM_VERSION}`;
 
 // `npm` and `npx` are `.cmd` shims on Windows: `execFileSync` cannot find

@@ -25,7 +25,7 @@ Cesium이 타일 bytes를 받은 뒤 콘텐츠 생성을 위임하는 내부 슬
 first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므로:
 
 - 모든 내부 접근을 `src/cesium-runtime/` 한 곳에 격리 (정적 검사로 강제)
-- 지원 버전을 검증된 1.142.0~1.145.x로 제한 (peer dependency)
+- 지원 버전을 검증된 1.142.0~1.146.x로 제한 (peer dependency)
 - 경계 규칙: source는 Cesium을 모른다. 검사가 실제로 보는 것은 **import
   지정자**다 — `src/cesium-runtime/` 밖의 파일이 `cesium`이나 `@cesium/engine`을
   import하면 `tests/cesium-boundary.test.ts`가 실패하고, CI가 이 스위트를 돌리므로
@@ -34,7 +34,7 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
   보는 것으로 충분하다. 이 검사가 덮지 못하는 것은 하나 — 인자로 건네받은 Cesium
   객체의 `_` 필드를 밖에서 만지는 코드다. cesium-runtime이 그런 객체를 경계 밖으로
   내보내지 않는 한 생기지 않는 경로이고, 그건 검사가 아니라 설계가 지킨다.
-- 검증 현황: **범위 양 끝이 렌더로 검증됨**(1.142.0과 1.145.0, headless Chromium —
+- 검증 현황: **범위 양 끝이 렌더로 검증됨**(1.142.0과 1.146.0, headless Chromium —
   각각 47점·20픽셀, provider 없는 대조군 0픽셀). 최초 hard gate는 1.143.0에서 통과했다.
   하한이 1.142인 것은 선택이 아니라 실측이다: 1.141에는 `_runtimeContentCodec` 슬롯
   자체가 없어 계약 테스트 4개가 깨진다. 계약은 미지수가 아니라 Cesium 소스에
@@ -47,8 +47,8 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
   2. 코덱 분기는 조기 return이라 Cesium의 콘텐츠 분류를 통째로 건너뛴다. `hasTilesetContent`·
      `hasRenderableContent`·`content.metadata`·`content.group`은 코덱이 직접 세팅해야 한다.
      hierarchy를 external tileset으로 확장할 때 이걸 빠뜨리면 서브트리가 아예 열리지 않는다.
-  3. 코덱의 `disableSkipLevelOfDetail` 필드는 문서에만 있고 1.142~1.145 어디에도
-     읽는 코드가 없다. 1.145가 읽는 것은 `tileset._disableSkipLevelOfDetail`이라는
+  3. 코덱의 `disableSkipLevelOfDetail` 필드는 문서에만 있고 1.142~1.146 어디에도
+     읽는 코드가 없다. 1.146이 읽는 것은 `tileset._disableSkipLevelOfDetail`이라는
      다른 필드이고, 그것마저 `preprocess3DTileContent` 뒤 — 코덱 분기가 이미 return한
      자리다.
      `skipLevelOfDetail`은 tileset 생성 옵션으로 넘긴다.
@@ -204,7 +204,7 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
     계약 문자열 검사는 파일 문자열 탐색이라 영향받지 않는다.
 - 핵심 의존성: copc.js(COPC 파싱), laz-perf(LAZ WASM 해제), proj4(CRS).
   이 목록 외의 의존성 추가는 구현하지 말고 확인 후 진행한다.
-- Cesium: peer `>=1.142.0 <1.146.0` (번들에 포함하지 않음)
+- Cesium: peer `>=1.142.0 <1.147.0` (번들에 포함하지 않음)
 - 빌드: rolldown(라이브러리+자체완결 Worker 번들), Vite(데모·테스트 앱)
   - Rollup으로 적었던 자리다. 순정 Rollup은 TypeScript를 스스로 벗지 못해
     트랜스폼 플러그인이 필요한데, `@rollup/plugin-typescript`는 바로 위 항목이
