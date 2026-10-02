@@ -7,6 +7,10 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-10-02
+
+Cesium 1.146 arrived. Widening to it took no code change.
+
 ### Added
 
 - Cesium 1.146 support. The peer range is `>=1.142.0 <1.147.0`, and both ends
@@ -275,7 +279,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.9.1...v0.10.0
