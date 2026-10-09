@@ -2,10 +2,19 @@
 
 Notable changes to `copc-tileset-provider`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
-follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — with the
-caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From 1.0.0
+on, a change that breaks the public API — the package root's exports,
+`fromUrl`'s options, the provider's members, the error classes and their
+`code`s, and the `./worker` subpath — waits for a major version. Before 1.0,
+minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
+
+## [1.0.0] — 2026-10-09
+
+The public API is now stable: from here on, a change that breaks it waits
+for 2.0. Nothing in it changed for this release — 0.11.1 code keeps
+working — and the Cesium peer range is still `>=1.142.0 <1.147.0`.
 
 ### Changed
 
@@ -16,6 +25,10 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
   Worker throws still reads `ZeroPointChunkError`, not a minified letter.
 - A Worker starts faster: it decodes its inlined wasm with a plain loop rather
   than a callback per byte, 7.2 ms down to 0.8 ms on an Apple M4 Pro.
+- Opening a file, and expanding each hierarchy page after it, builds the
+  synthetic tileset faster: every node's corners go through the projection
+  once instead of four times. On SoFi's root page (2,599 nodes) that is
+  24.4 ms down to 16.8 ms, and the tileset produced is byte-identical.
 
 ## [0.11.1] — 2026-10-02
 
@@ -289,7 +302,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.1...v1.0.0
 [0.11.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.0...v0.10.1
