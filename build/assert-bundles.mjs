@@ -30,6 +30,15 @@ export function assertBundles(distDir) {
     }
   }
 
+  // The Worker bundle is minified, and a Worker's error crosses back carrying
+  // the `name` it had there (`fromWire`). Without `keepNames` the minifier
+  // renames every class, so a caller would read `e` where it should read
+  // `ZeroPointChunkError` — and this name appears nowhere else in the bundle
+  // once it is gone, measured.
+  if (!worker.includes('ZeroPointChunkError')) {
+    throw new Error('dist/worker.js renamed its error classes; keep `keepNames` on its output');
+  }
+
   if (statSync(join(distDir, 'worker.js')).size < WORKER_MIN_BYTES) {
     throw new Error('dist/worker.js is too small to contain the inlined wasm');
   }

@@ -20,7 +20,12 @@ const EXTERNAL = ['cesium', 'copc', 'proj4'];
 export default defineConfig([
   {
     input: 'src/worker/browser.ts',
-    output: { file: 'dist/worker.js', format: 'es' },
+    // Minified here because nothing downstream can: the library bundle
+    // carries this file as a string literal (`worker-source.mjs`), and a
+    // consumer's bundler never looks inside a string. `keepNames` because a
+    // Worker's error crosses back carrying the `name` it had in this bundle
+    // (`fromWire`), and a minifier would otherwise rename every error class.
+    output: { file: 'dist/worker.js', format: 'es', minify: true, keepNames: true },
     platform: 'browser',
     // Belt-and-braces: laz-perf's own `browser` field already selects this
     // build, measured byte-identical either way. Named here because that

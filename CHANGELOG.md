@@ -7,6 +7,16 @@ caveat that `0.x` minors may carry behaviour changes, as 0.2.0 does.
 
 ## [Unreleased]
 
+### Changed
+
+- The Worker bundle is minified before the library inlines it. `dist/index.js`
+  carries that bundle as a string, which no consumer's bundler can shrink, so
+  a minified consumer build of this library drops from 965 KB to 760 KB
+  (295 KB to 255 KB gzipped). Error classes keep their names: an error a
+  Worker throws still reads `ZeroPointChunkError`, not a minified letter.
+- A Worker starts faster: it decodes its inlined wasm with a plain loop rather
+  than a callback per byte, 7.2 ms down to 0.8 ms on an Apple M4 Pro.
+
 ## [0.11.1] — 2026-10-02
 
 Cesium 1.146 arrived. Widening to it took no code change.
