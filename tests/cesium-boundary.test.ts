@@ -20,8 +20,9 @@ function listTsFiles(dir: string): string[] {
 }
 
 /**
- * Whether `source` names `cesium` or `@cesium/engine` as an import
- * specifier — a static `import ... from '...'`, a bare `import '...'`, or a
+ * Whether `source` names a Cesium package as an import specifier: `cesium`,
+ * a path inside it, or any `@cesium/*` package (`engine`, `widgets`, and
+ * `core`, which 1.146 split out of the engine) — a static `import ... from '...'`, a bare `import '...'`, or a
  * literal dynamic `import('...')`. Deliberately not `importClosure`'s own
  * `findSpecifiers`: that walker only ever records *relative* specifiers
  * (`content.startsWith('.')`, `tests/import-closure.ts`), so a bare package
@@ -38,13 +39,37 @@ function listTsFiles(dir: string): string[] {
  * never produces.
  */
 function importsCesium(source: string): boolean {
-  const specifier = "(['\"])(cesium|@cesium/engine)\\1";
+  const specifier = "(['\"])(cesium(?:/[^'\"]*)?|@cesium/[^'\"]+)\\1";
   return (
     new RegExp(`\\bfrom\\s*${specifier}`).test(source) ||
     new RegExp(`^\\s*import\\s*${specifier}`, 'm').test(source) ||
     new RegExp(`\\bimport\\s*\\(\\s*${specifier}\\s*\\)`).test(source)
   );
 }
+
+describe('importsCesium', () => {
+  // Cesium 1.146 split its math and utility classes into @cesium/core, so a
+  // check that names only @cesium/engine would let that package through.
+  it.each([
+    "import { Cartesian3 } from 'cesium';",
+    "import { Cartesian3 } from '@cesium/engine';",
+    "import { Cartesian3 } from '@cesium/core';",
+    "import { Viewer } from '@cesium/widgets';",
+    "import Cartesian3 from 'cesium/Source/Core/Cartesian3.js';",
+    "import '@cesium/core';",
+    "const core = await import('@cesium/core');",
+  ])('catches %s', (source) => {
+    expect(importsCesium(source)).toBe(true);
+  });
+
+  it.each([
+    "import { thing } from 'cesium-like';",
+    "import { thing } from '@cesiumjs/other';",
+    '// re-exported from `@cesium/core` by cesium',
+  ])('leaves %s alone', (source) => {
+    expect(importsCesium(source)).toBe(false);
+  });
+});
 
 describe('what src/index.ts can reach', () => {
   const reachable = importClosure('index.ts');
@@ -75,7 +100,7 @@ describe('nothing outside src/cesium-runtime/ imports cesium', () => {
     expect(files.length).toBeGreaterThan(0);
   });
 
-  it('names neither "cesium" nor "@cesium/engine" as an import specifier', () => {
+  it('names no Cesium package as an import specifier', () => {
     const offenders = files
       .map(srcRelative)
       .filter((file) => importsCesium(readFileSync(join(SRC, file), 'utf8')));

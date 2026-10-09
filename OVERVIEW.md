@@ -27,7 +27,7 @@ first-party MVT 경로가 실제로 쓰는 패턴이다. 공개 API가 아니므
 - 모든 내부 접근을 `src/cesium-runtime/` 한 곳에 격리 (정적 검사로 강제)
 - 지원 버전을 검증된 1.142.0~1.146.x로 제한 (peer dependency)
 - 경계 규칙: source는 Cesium을 모른다. 검사가 실제로 보는 것은 **import
-  지정자**다 — `src/cesium-runtime/` 밖의 파일이 `cesium`이나 `@cesium/engine`을
+  지정자**다 — `src/cesium-runtime/` 밖의 파일이 `cesium`(하위 경로 포함)이나 `@cesium/*` 패키지(`engine`·`widgets`, 1.146에서 갈라져 나온 `core`)를
   import하면 `tests/cesium-boundary.test.ts`가 실패하고, CI가 이 스위트를 돌리므로
   머지가 막힌다. underscore 필드나 factory 접근 자체를 보는 것이 아니다:
   Cesium을 import할 수 없는 파일은 그 필드에 닿을 경로가 없으므로 import 하나를
