@@ -12,9 +12,7 @@ import { formatRangeHeader, parseContentRange, type ByteRange } from './content-
 
 // Defaults come from OVERVIEW §7. Changing them requires a measurement and an
 // update to that table.
-const DEFAULT_BASE_TIMEOUT_MS = 8_000;
-const DEFAULT_TIMEOUT_MS_PER_MEBIBYTE = 2_000;
-const BYTES_PER_MEBIBYTE = 1024 * 1024;
+const DEFAULT_STALL_TIMEOUT_MS = 8_000;
 
 // OVERVIEW §7: two retries, waiting 0.5s then 2s. The array length is the
 // retry count — one delay per retry, so the two cannot drift apart.
@@ -71,13 +69,49 @@ function isWorthRetrying(error: unknown): boolean {
   return error instanceof RangeRequestFailedError && error.status >= 500;
 }
 
+/**
+ * Reads a response body chunk by chunk into a buffer of the expected size.
+ *
+ * Chunk by chunk rather than `arrayBuffer()` so that every chunk can count as
+ * progress for the stall watchdog in `readOnce`; `arrayBuffer()` says nothing
+ * until the last byte is in. `received` is how many bytes the body really
+ * held. Bytes past `expected` are counted but not kept: the caller rejects
+ * any length other than `expected`, so they would only be thrown away.
+ */
+async function readBody(
+  response: Response,
+  expected: number,
+  onChunk: () => void,
+): Promise<{ bytes: ArrayBuffer; received: number }> {
+  const bytes = new Uint8Array(expected);
+  let received = 0;
+  if (response.body === null) {
+    return { bytes: bytes.buffer, received };
+  }
+
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return { bytes: bytes.buffer, received };
+    }
+    onChunk();
+    if (received < expected) {
+      bytes.set(value.subarray(0, expected - received), received);
+    }
+    received += value.byteLength;
+  }
+}
+
 export interface RangeReaderOptions {
   /** Injected for tests, which must never touch the network. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Base request deadline in milliseconds. Defaults to 8000. */
-  readonly baseTimeoutMs?: number;
-  /** Additional deadline per mebibyte of request size in milliseconds. Defaults to 2000. */
-  readonly timeoutMsPerMebibyte?: number;
+  /**
+   * How long this reader may receive nothing at all — no headers and no body
+   * bytes, on any of its requests — before it abandons a request, in
+   * milliseconds. Defaults to 8000 (OVERVIEW §7).
+   */
+  readonly stallTimeoutMs?: number;
   /**
    * Delay before each retry, in milliseconds. The array's length is the
    * retry count — there is no separate max-retries option. Defaults to
@@ -167,8 +201,7 @@ export interface RangeReader {
  */
 export function createRangeReader(url: string, options: RangeReaderOptions = {}): RangeReader {
   const doFetch = options.fetch ?? globalThis.fetch;
-  const baseTimeoutMs = options.baseTimeoutMs ?? DEFAULT_BASE_TIMEOUT_MS;
-  const timeoutMsPerMebibyte = options.timeoutMsPerMebibyte ?? DEFAULT_TIMEOUT_MS_PER_MEBIBYTE;
+  const stallTimeoutMs = options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
   // Built with a conditional spread rather than passed straight through:
@@ -193,12 +226,12 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     requestsSaved: 0,
   };
 
-  // Coalescing (Decision 4) makes some requests much larger than others, so the
-  // deadline grows with size. A flat timeout would kill exactly the big merged
-  // reads that coalescing exists to create.
-  function deadlineFor(range: ByteRange): number {
-    return baseTimeoutMs + Math.ceil(range.length / BYTES_PER_MEBIBYTE) * timeoutMsPerMebibyte;
-  }
+  // When any request of this reader last received something — its headers or
+  // a chunk of its body. readOnce explains why the clock is shared.
+  let lastProgressAt = 0;
+  const noteProgress = (): void => {
+    lastProgressAt = Date.now();
+  };
 
   /**
    * One attempt at one span.
@@ -226,16 +259,43 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
     // both count the same attempts.
     counters.bytesWasted += range.length - wantedBytes;
 
-    const timeoutMs = deadlineFor(range);
+    // A request is abandoned only when the whole reader has gone quiet: nothing
+    // received on any of its requests for stallTimeoutMs. A deadline of its
+    // own cannot tell a slow request from a dead one. On a slow link every
+    // request is slow, and a merged one (Decision 4) slower still. A browser
+    // also holds requests beyond its per-host connection limit (six on
+    // HTTP/1.1) before sending them, and that wait, which JavaScript cannot
+    // see, would count against a per-request clock. On HTTP/2 the server picks
+    // which stream's bytes go first, so one request's own silence says
+    // nothing either. The whole file going silent does: then no request is
+    // being served.
+    //
+    // The price: if one connection dies while the others keep delivering, this
+    // does not notice until they have finished.
+    //
+    // The first check comes a full window after this request starts, so a
+    // request sent into a silence still gets the whole window, and so does a
+    // retry.
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     // Hand-rolled instead of AbortSignal.timeout: Vitest's fake timers patch
     // setTimeout, so vi.advanceTimersByTimeAsync can fast-forward this
-    // deadline in tests. AbortSignal.timeout runs on a timer the fake clock
+    // watchdog in tests. AbortSignal.timeout runs on a timer the fake clock
     // cannot reach, which would turn a millisecond test into a real sleep.
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const watch = (delayMs: number): void => {
+      timer = setTimeout(() => {
+        const quietMs = Date.now() - lastProgressAt;
+        if (quietMs >= stallTimeoutMs) {
+          controller.abort();
+        } else {
+          watch(stallTimeoutMs - quietMs);
+        }
+      }, delayMs);
+    };
+    watch(stallTimeoutMs);
 
     // The caller's own signal shares this fetch's controller, so an external
-    // cancel ends the request the same way the deadline does. The catch
+    // cancel ends the request the same way the watchdog does. The catch
     // block below is what tells the two apart afterward.
     const onCallerAbort = (): void => controller.abort();
     signal?.addEventListener('abort', onCallerAbort, { once: true });
@@ -245,6 +305,7 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
         headers: { range: requested },
         signal: controller.signal,
       });
+      noteProgress();
 
       if (response.status !== 206) {
         // Decision 4: a 200 is the whole file, which this library never accepts.
@@ -277,23 +338,18 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
         }
       }
 
-      // The deadline has to cover this read too: for a static byte range,
-      // time-to-headers barely depends on size, so body transfer is the only
-      // phase that actually scales with request length. OVERVIEW §7 sizes
-      // timeoutMsPerMebibyte for exactly that phase — a term that protects
-      // nothing if the clock stops before this line runs.
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength !== range.length) {
+      const { bytes, received } = await readBody(response, range.length, noteProgress);
+      if (received !== range.length) {
         // With the header, this says it agreed and the body did not — a
         // truncated or rewritten response. Without it, this *is* the whole
         // verification, so the same mismatch has to be reported as what it
         // leaves the caller unable to establish.
         throw header === null
-          ? new ContentRangeUnreadableError(url, range.length, bytes.byteLength)
+          ? new ContentRangeUnreadableError(url, range.length, received)
           : new ContentRangeMismatchError(
               url,
               `${requested} (${range.length} bytes)`,
-              `${header} (${bytes.byteLength} bytes)`,
+              `${header} (${received} bytes)`,
             );
       }
 
@@ -303,7 +359,7 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
       // the library reads it.
       return { bytes, totalBytes: parsed?.totalBytes ?? null };
     } catch (cause) {
-      // The caller's abort also trips our deadline controller, so this has to
+      // The caller's abort also trips our watchdog's controller, so this has to
       // come first — otherwise a cancelled read is reported as a timeout.
       // This guards the attempt itself; sleep()'s already-aborted check guards
       // the way into the next one. Neither makes the other redundant.
@@ -315,7 +371,7 @@ export function createRangeReader(url: string, options: RangeReaderOptions = {})
         throw cause;
       }
       throw controller.signal.aborted
-        ? new RangeTimeoutError(url, timeoutMs)
+        ? new RangeTimeoutError(url, stallTimeoutMs)
         : new RangeNetworkError(url, cause);
     } finally {
       clearTimeout(timer);

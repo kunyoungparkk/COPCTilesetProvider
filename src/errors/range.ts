@@ -70,7 +70,12 @@ export class RangeNetworkError extends CopcTilesetError {
   }
 }
 
-/** The request outlived its deadline. */
+/**
+ * Nothing arrived from the file for `timeoutMs`, so the request was abandoned.
+ *
+ * Silence, not slowness: the wait restarts whenever any request to the same
+ * file receives data, so a slow connection that keeps delivering never ends here.
+ */
 export class RangeTimeoutError extends CopcTilesetError {
   readonly code = 'range-timeout';
   readonly url: string;
@@ -78,8 +83,8 @@ export class RangeTimeoutError extends CopcTilesetError {
 
   constructor(url: string, timeoutMs: number) {
     super(
-      `${url} did not respond within ${timeoutMs}ms. The deadline scales with request ` +
-        'size; a server this slow will not stream a point cloud usefully.',
+      `${url} sent no data for ${timeoutMs}ms. A slow transfer is waited for as long as ` +
+        'any data from this file keeps arriving; this server stopped sending altogether.',
     );
     this.url = url;
     this.timeoutMs = timeoutMs;

@@ -37,6 +37,46 @@ function partial(body: ArrayBuffer, contentRange: string | null): Response {
   return new Response(body, { status: 206, headers });
 }
 
+/**
+ * A 206 whose body the test feeds by hand, so time can pass between chunks.
+ *
+ * Aborting the request errors the body, as a browser's fetch does: that is
+ * how the reader's watchdog ends a transfer that has already begun.
+ */
+function feedableBody() {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      stream = controller;
+    },
+  });
+
+  return {
+    respond(init: RequestInit | undefined, contentRange: string): Response {
+      init?.signal?.addEventListener('abort', () => stream.error(new Error('aborted')));
+      return new Response(body, { status: 206, headers: { 'content-range': contentRange } });
+    },
+    send(bytes: number[]): void {
+      stream.enqueue(new Uint8Array(bytes));
+    },
+    end(): void {
+      stream.close();
+    },
+  };
+}
+
+/** Wraps a promise so a test can ask whether it has settled yet. */
+function settles<T>(promise: Promise<T>) {
+  const state = { promise, settled: false };
+  // The rejection is still the test's to assert on through `state.promise`;
+  // this handler only records that it happened.
+  promise.then(
+    () => (state.settled = true),
+    () => (state.settled = true),
+  );
+  return state;
+}
+
 describe('createRangeReader', () => {
   it('sends the requested range and returns the bytes', async () => {
     const body = new Uint8Array([1, 2, 3, 4]).buffer;
@@ -137,57 +177,122 @@ describe('createRangeReader', () => {
     ).rejects.toMatchObject({ code: 'range-network' });
   });
 
-  it('gives a large request proportionally more time', async () => {
+  it('abandons a request after eight seconds in which nothing arrives', async () => {
     vi.useFakeTimers();
     try {
-      // Never resolves, so only the deadline can end this request.
+      // Never resolves, so only the stall watchdog can end this request.
       const fetch = ((_input: unknown, init?: RequestInit) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
         })) as unknown as typeof globalThis.fetch;
 
-      const oneMebibyte = 1024 * 1024;
-      const pending = createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).read({
-        offset: 0,
-        length: 4 * oneMebibyte,
-      });
-      const assertion = expect(pending).rejects.toMatchObject({
-        code: 'range-timeout',
-        // 8s base plus 2s for each of four mebibytes.
-        timeoutMs: 16_000,
-      });
+      const pending = settles(
+        createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).read({ offset: 0, length: 4 }),
+      );
 
-      await vi.advanceTimersByTimeAsync(16_000);
-      await assertion;
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(pending.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending.promise).rejects.toMatchObject({
+        code: 'range-timeout',
+        timeoutMs: 8_000,
+      });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  // Pins base and slope separately: 4 MiB -> 16_000 alone is also satisfied by
-  // baseTimeoutMs: 0, timeoutMsPerMebibyte: 4_000, since 4 * 4_000 == 16_000.
-  // A sub-mebibyte request only matches the real defaults (8_000 + 1 * 2_000).
-  it('gives a 1-byte request the base timeout plus one rounded-up mebibyte', async () => {
+  // The reason the watchdog measures silence rather than total time: a
+  // transfer on a slow link can take far longer than any fixed deadline and
+  // still be healthy. Here four bytes take 28 seconds, a byte every seven.
+  it('waits out a slow body for as long as its bytes keep arriving', async () => {
     vi.useFakeTimers();
     try {
-      // Never resolves, so only the deadline can end this request.
+      const body = feedableBody();
       const fetch = ((_input: unknown, init?: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-        })) as unknown as typeof globalThis.fetch;
+        Promise.resolve(body.respond(init, 'bytes 0-3/1000'))) as unknown as typeof globalThis.fetch;
 
       const pending = createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).read({
         offset: 0,
-        length: 1,
+        length: 4,
       });
-      const assertion = expect(pending).rejects.toMatchObject({
-        code: 'range-timeout',
-        // 8s base plus one partial mebibyte, rounded up, times 2s.
-        timeoutMs: 10_000,
-      });
+      for (const byte of [1, 2, 3, 4]) {
+        await vi.advanceTimersByTimeAsync(7_000);
+        body.send([byte]);
+      }
+      body.end();
 
-      await vi.advanceTimersByTimeAsync(10_000);
-      await assertion;
+      expect(new Uint8Array((await pending).bytes)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The other half of the same rule: the body itself is watched, not only the
+  // wait for headers.
+  it('abandons a body that stops arriving midway', async () => {
+    vi.useFakeTimers();
+    try {
+      const body = feedableBody();
+      const fetch = ((_input: unknown, init?: RequestInit) =>
+        Promise.resolve(body.respond(init, 'bytes 0-3/1000'))) as unknown as typeof globalThis.fetch;
+
+      const pending = settles(
+        createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] }).read({ offset: 0, length: 4 }),
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      body.send([1]);
+
+      // Eight seconds from that byte, not from the request's start.
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(pending.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending.promise).rejects.toMatchObject({ code: 'range-timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Why the clock is the reader's and not the request's. A browser holds a
+  // request it has no free connection for before sending it, and on HTTP/2 the
+  // server decides which stream's bytes go first, so a request can wait in
+  // silence behind others that are being served. While any request of the file
+  // receives data, none is abandoned; once all of it stops, the waiting one
+  // gets the usual eight seconds.
+  it('keeps a waiting request alive while another request of the file receives data', async () => {
+    vi.useFakeTimers();
+    try {
+      const body = feedableBody();
+      let calls = 0;
+      const fetch = ((_input: unknown, init?: RequestInit) => {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.resolve(body.respond(init, 'bytes 0-3/1000'));
+        }
+        // The second request never hears back, like one queued behind the first.
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }) as unknown as typeof globalThis.fetch;
+
+      const reader = createRangeReader(FILE_URL, { fetch, retryDelaysMs: [] });
+      const flowing = reader.read({ offset: 0, length: 4 });
+      const waiting = settles(reader.read({ offset: 8_000_000, length: 4 }));
+
+      for (const byte of [1, 2, 3, 4]) {
+        await vi.advanceTimersByTimeAsync(7_000);
+        body.send([byte]);
+      }
+      body.end();
+      await flowing;
+
+      // 28 seconds in: three times the window, and the waiting request is
+      // still alive because bytes kept arriving for the file.
+      expect(waiting.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(waiting.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(waiting.promise).rejects.toMatchObject({ code: 'range-timeout' });
     } finally {
       vi.useRealTimers();
     }
@@ -291,7 +396,7 @@ describe('retry policy', () => {
       const assertion = expect(pending).resolves.toMatchObject({ totalBytes: 10 });
 
       // Enough virtual time for either code path to fully settle: the fix
-      // only needs attempt 1's 10s deadline plus its 500ms retry delay; a
+      // only needs attempt 1's 8s stall window plus its 500ms retry delay; a
       // surviving shared-controller mutation fails attempt 2 instantly on
       // the stale signal and needs its 2s retry delay on top of that.
       await vi.advanceTimersByTimeAsync(13_000);
@@ -479,21 +584,21 @@ describe('readMany', () => {
   // the exception — a second allocation of the whole chunk, per tile, per
   // frame. The response body is this caller's already.
   it('hands a group of one its response buffer rather than a copy of it', async () => {
-    const body = new Uint8Array([1, 2, 3, 4]).buffer;
-    // Hand-built rather than a real `Response`, whose own `arrayBuffer()`
-    // allocates: identity is the whole assertion, so the buffer this reader
-    // is handed has to be one the test still holds.
-    const fetch = (() =>
-      Promise.resolve({
-        status: 206,
-        headers: new Headers({ 'content-range': 'bytes 0-3/1000' }),
-        body: null,
-        arrayBuffer: () => Promise.resolve(body),
-      })) as unknown as typeof globalThis.fetch;
+    const { fetch } = stubFetch(partial(new Uint8Array([1, 2, 3, 4]).buffer, 'bytes 0-3/1000'));
+    // The reader assembles its buffer from the body's chunks, so the test
+    // cannot hold that buffer in advance and compare identity. It watches for
+    // the copy instead: `ArrayBuffer#slice` is how readMany would make one.
+    // Installed after the stub's Response is built, which copies its source.
+    const slice = vi.spyOn(ArrayBuffer.prototype, 'slice');
+    try {
+      const answers = createRangeReader(FILE_URL, { fetch }).readMany([{ offset: 0, length: 4 }]);
+      const bytes = await answer(answers, 0);
 
-    const answers = createRangeReader(FILE_URL, { fetch }).readMany([{ offset: 0, length: 4 }]);
-
-    expect(await answer(answers, 0)).toBe(body);
+      expect(slice).not.toHaveBeenCalled();
+      expect(new Uint8Array(bytes)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    } finally {
+      slice.mockRestore();
+    }
   });
 
   // The other half of the rule above: a merged response must be split into

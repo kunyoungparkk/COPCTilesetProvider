@@ -67,10 +67,9 @@ export interface COPCTilesetProviderOptions {
    * route through a proxy — whatever it returns still has to satisfy
    * Decision 4: a 206 with a `Content-Range` this library can verify against
    * what it asked for. (Not, despite the shape, a hook that exists only for
-   * this library's own tests: `RangeReaderOptions` carries three more §7
-   * knobs this option does not forward — `baseTimeoutMs`,
-   * `timeoutMsPerMebibyte`, `retryDelaysMs` — because those are tuned, not
-   * substituted.)
+   * this library's own tests: `RangeReaderOptions` carries §7 knobs this
+   * option does not forward, such as `stallTimeoutMs` and `retryDelaysMs`,
+   * because those are tuned, not substituted.)
    */
   readonly fetch?: typeof globalThis.fetch;
   /**
