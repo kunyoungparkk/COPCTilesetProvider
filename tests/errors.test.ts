@@ -82,13 +82,13 @@ describe('transport errors', () => {
     expect(error.message).toContain('could not be reached');
   });
 
-  it('reports timeout deadlines and scaling with request size', () => {
+  it('reports how long nothing arrived, and that slowness alone is waited out', () => {
     const error = new RangeTimeoutError('https://host/a.copc.laz', 8000);
 
     expect(error.code).toBe('range-timeout');
     expect(error.timeoutMs).toBe(8000);
-    expect(error.message).toContain('8000ms');
-    expect(error.message).toContain('scales with request');
+    expect(error.message).toContain('no data for 8000ms');
+    expect(error.message).toContain('keeps arriving');
   });
 
   it('diagnoses range mismatches with expected and received', () => {

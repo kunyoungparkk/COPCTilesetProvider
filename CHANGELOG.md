@@ -10,6 +10,24 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+### Fixed
+
+- Slow connections no longer lose tiles. A request used to be abandoned 8 s
+  plus 2 s per MiB after it was sent, however steadily its bytes were
+  arriving, and a tile whose request failed stayed failed. That clock also
+  counted the time a request spent queued in the browser behind others to the
+  same host, and the time it spent sharing the link with them, so on a slow
+  link healthy reads timed out. On a local server limited to 2 Mbps, the
+  Autzen overview lost 32 of its 39 tiles, and the retries grew the bytes
+  requested from 13.5 MB to 38.3 MB; at 4 Mbps it lost 17. Now a request is
+  abandoned only when nothing, neither headers nor body bytes, has arrived
+  for 8 s on any request to the same file. The same runs load all 39 tiles
+  with no retries and 13.5 MB requested. A request to a server that has
+  stopped sending is still abandoned after 8 s and retried as before.
+- `RangeTimeoutError`'s message now says the file sent nothing for that long,
+  instead of saying the deadline scales with request size. Its `code` and
+  `timeoutMs` are unchanged.
+
 ## [1.0.0] — 2026-10-09
 
 The public API is now stable: from here on, a change that breaks it waits
