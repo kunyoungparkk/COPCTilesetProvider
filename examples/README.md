@@ -56,10 +56,14 @@ The intensity ramp saturates at a value read off this file (its 95th
 percentile, 42,752). That range belongs to the sensor that captured the data,
 not to the format, so another dataset needs its own number.
 
-Point shading starts on — attenuation capped at 2 px with eye-dome lighting —
-because Cesium's default is one-pixel points with no lighting, and on this
-file that reads as a flat smudge. `main.js` explains why the cap is 2 rather
-than Cesium's default of 5.
+Point attenuation starts on, capped at 2 px, because Cesium's default is
+one-pixel points, and on this file that reads as a flat smudge. `main.js`
+explains why the cap is 2 rather than Cesium's default of 5.
+
+Eye-dome lighting starts off. It outlines every depth jump, the gaps between
+points included, and over this file's photographic RGB that reads as
+drawn-on edges. Its switch is worth turning on for the elevation, intensity
+and classification colours, which have no shading of their own.
 
 ## Vertical datum
 
