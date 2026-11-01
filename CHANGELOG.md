@@ -10,6 +10,11 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-11-01
+
+Slow connections no longer lose tiles. No public API changed, and the Cesium
+peer range is still `>=1.142.0 <1.147.0`.
+
 ### Fixed
 
 - Slow connections no longer lose tiles. A request used to be abandoned 8 s
@@ -320,7 +325,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.1...v1.0.0
 [0.11.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.10.1...v0.11.0
