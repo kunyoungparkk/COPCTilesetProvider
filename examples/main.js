@@ -59,15 +59,24 @@ try {
   // Point shading, which Cesium leaves off: without it every point is one
   // pixel, trees read as flat smudges and the ground stripes. Measured on this
   // file (2026-10-15, same tiles and camera, only these settings changed),
-  // attenuation capped at 2 px with eye-dome lighting read closest to Potree.
-  // The cap matters more than the switch. Cesium sizes an attenuated point by
-  // its own tile's geometric error, and under ADD refinement (Decision 6) the
-  // coarse ancestors' points stay on screen at full size, so Cesium's default
-  // cap of 5 px turns them into blocks. These are tileset settings, not
-  // library ones: the panel's size slider and EDL switch write the same fields.
+  // attenuation capped at 2 px read closest to Potree. The cap matters more
+  // than the switch. Cesium sizes an attenuated point by its own tile's
+  // geometric error, and under ADD refinement (Decision 6) the coarse
+  // ancestors' points stay on screen at full size, so Cesium's default cap of
+  // 5 px turns them into blocks.
+  //
+  // Eye-dome lighting starts off, and has to be said: Cesium turns it on with
+  // attenuation unless told otherwise. It is not lighting. It darkens each
+  // pixel by how far it sits behind its neighbours, so every depth jump gets a
+  // dark outline, the gaps between points up close included, and over this
+  // file's photographic RGB, which already carries the sun's shading, that
+  // reads as drawn-on edges. The panel's switch turns it on; it helps most in
+  // the elevation, intensity and classification colours, which have no
+  // shading of their own. These are tileset settings, not library ones: the
+  // panel's size slider and EDL switch write the same fields.
   tileset.pointCloudShading.attenuation = true;
   tileset.pointCloudShading.maximumAttenuation = 2;
-  tileset.pointCloudShading.eyeDomeLighting = true;
+  tileset.pointCloudShading.eyeDomeLighting = false;
 
   // Nothing below is a feature of this library either. The worker writes
   // Classification and Intensity into the PNTS batch table (Decision 6), and
