@@ -40,17 +40,26 @@ visit worked.
 
 ## The style panel
 
-The four radio buttons on the right set `provider.tileset.style` and do
-nothing else. `Classification` is reachable from them because the worker
-writes it into the PNTS batch table (OVERVIEW Decision 6), so Cesium's own
-style language addresses it the way it would on any 3D Tiles content — the
-filtering runs in the point cloud shader, not in this library, and no tile is
-re-requested or re-decoded when the selection changes.
+The panel on the right touches only Cesium: `Colour` and `Show` together set
+`provider.tileset.style`, and `Points` sets `tileset.pointCloudShading`. None
+of it is a feature of this library. `Classification` and `Intensity` are
+reachable because the worker writes them into the PNTS batch table (OVERVIEW
+Decision 6), so Cesium's own style language addresses them the way it would on
+any 3D Tiles content — the colouring and filtering run in the point cloud
+shader, and no tile is re-requested or re-decoded when a choice changes.
 
-`Intensity` sits in the batch table beside it and is styleable the same way.
-The panel leaves it out because a ramp that reads well needs this dataset's
-actual intensity range, and that range is a property of the file rather than
-of the format.
+`Elevation` has no attribute behind it. It is computed in the shader from
+`POSITION_ABSOLUTE`, and its ramp spans the root tile's height range, which is
+the file header's Z range.
+
+The intensity ramp saturates at a value read off this file (its 95th
+percentile, 42,752). That range belongs to the sensor that captured the data,
+not to the format, so another dataset needs its own number.
+
+Point shading starts on — attenuation capped at 2 px with eye-dome lighting —
+because Cesium's default is one-pixel points with no lighting, and on this
+file that reads as a flat smudge. `main.js` explains why the cap is 2 rather
+than Cesium's default of 5.
 
 ## Vertical datum
 

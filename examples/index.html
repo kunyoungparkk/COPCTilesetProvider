@@ -23,7 +23,7 @@
         font-size: 12px; line-height: 1.6;
       }
       #stats.error { border-color: #a3352f; color: #ffb4ae; }
-      #filters {
+      #panel {
         position: absolute; top: 12px; right: 12px; z-index: 10;
         padding: 9px 11px; border-radius: 6px;
         background: rgba(13, 13, 15, 0.86); backdrop-filter: blur(6px);
@@ -31,8 +31,12 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px; line-height: 1.7;
       }
-      #filters label { display: block; cursor: pointer; }
-      #filters input { margin: 0 7px 0 0; vertical-align: -1px; }
+      #panel fieldset { margin: 0 0 8px; padding: 0; border: 0; }
+      #panel fieldset:last-child { margin-bottom: 0; }
+      #panel legend { padding: 0; color: #9a9a9a; }
+      #panel label { display: block; cursor: pointer; }
+      #panel input { margin: 0 7px 0 0; vertical-align: -1px; }
+      #panel input[type="range"] { width: 96px; vertical-align: middle; }
     </style>
   </head>
   <body>
@@ -41,11 +45,25 @@
 
     <!-- Hidden until there is a tileset to style. A dead control panel sitting
          over the library's own error message would read as a second failure. -->
-    <div id="filters" hidden>
-      <label><input type="radio" name="filter" value="all" checked /> All points</label>
-      <label><input type="radio" name="filter" value="byClass" /> Colour by class</label>
-      <label><input type="radio" name="filter" value="ground" /> Ground only</label>
-      <label><input type="radio" name="filter" value="noVegetation" /> No vegetation</label>
+    <div id="panel" hidden>
+      <fieldset>
+        <legend>Colour</legend>
+        <label><input type="radio" name="colour" value="rgb" checked /> RGB</label>
+        <label><input type="radio" name="colour" value="byClass" /> Classification</label>
+        <label><input type="radio" name="colour" value="intensity" /> Intensity</label>
+        <label><input type="radio" name="colour" value="elevation" /> Elevation</label>
+      </fieldset>
+      <fieldset>
+        <legend>Show</legend>
+        <label><input type="radio" name="show" value="all" checked /> All points</label>
+        <label><input type="radio" name="show" value="ground" /> Ground only</label>
+        <label><input type="radio" name="show" value="noVegetation" /> No vegetation</label>
+      </fieldset>
+      <fieldset>
+        <legend>Points</legend>
+        <label><input type="checkbox" id="edl" checked /> Eye-dome lighting</label>
+        <label><input type="range" id="size" min="1" max="4" step="1" value="2" /> Size</label>
+      </fieldset>
     </div>
 
     <!-- Where Cesium finds its own Workers, wasm and Assets/. The IIFE build
