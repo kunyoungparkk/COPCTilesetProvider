@@ -54,42 +54,90 @@ try {
   });
   widget.scene.primitives.add(provider);
 
-  // Nothing below is a feature of this library. The worker writes
-  // Classification into the PNTS batch table (Decision 6), and that is the
-  // whole reason Cesium's own style language can address it — these
-  // expressions compile into the point cloud shader exactly as they would on
-  // any other 3D Tiles content.
+  const tileset = provider.tileset;
+
+  // Point shading, which Cesium leaves off: without it every point is one
+  // pixel, trees read as flat smudges and the ground stripes. Measured on this
+  // file (2026-10-15, same tiles and camera, only these settings changed),
+  // attenuation capped at 2 px with eye-dome lighting read closest to Potree.
+  // The cap matters more than the switch. Cesium sizes an attenuated point by
+  // its own tile's geometric error, and under ADD refinement (Decision 6) the
+  // coarse ancestors' points stay on screen at full size, so Cesium's default
+  // cap of 5 px turns them into blocks. These are tileset settings, not
+  // library ones: the panel's size slider and EDL switch write the same fields.
+  tileset.pointCloudShading.attenuation = true;
+  tileset.pointCloudShading.maximumAttenuation = 2;
+  tileset.pointCloudShading.eyeDomeLighting = true;
+
+  // Nothing below is a feature of this library either. The worker writes
+  // Classification and Intensity into the PNTS batch table (Decision 6), and
+  // that is the whole reason Cesium's own style language can address them —
+  // these expressions compile into the point cloud shader exactly as they
+  // would on any other 3D Tiles content, so switching never re-requests or
+  // re-decodes a tile.
   //
-  // The conditions are ASPRS codes chosen against what this file actually
-  // carries, counted over its root node: 5 high vegetation 47.5%, 2 ground
-  // 39.4%, 9 water 5.0%, 0 never-classified 3.6%, 6 building 2.7%, and a tail
-  // of user-defined codes at or above 64. Low and medium vegetation (3, 4) are
-  // absent, so `No vegetation` turns on removing 5 alone; the range is written
-  // out anyway because it is the classification's meaning, not this file's.
-  // The trailing `true` catches the tail, so no point goes uncoloured.
-  const STYLES = {
+  // The class conditions are ASPRS codes chosen against what this file
+  // actually carries, counted over its root node: 5 high vegetation 47.5%,
+  // 2 ground 39.4%, 9 water 5.0%, 0 never-classified 3.6%, 6 building 2.7%,
+  // and a tail of user-defined codes at or above 64. Low and medium vegetation
+  // (3, 4) are absent, so `No vegetation` turns on removing 5 alone; the range
+  // is written out anyway because it is the classification's meaning, not this
+  // file's. The trailing `true` catches the tail, so no point goes uncoloured.
+  //
+  // Intensity is a 16-bit field whose spread belongs to the sensor, not the
+  // format. Sampled over this file's first nine nodes, the median is 5,376
+  // and the 95th percentile 42,752, so the ramp saturates at 43,000 and its
+  // square root lifts the dark majority off black.
+  //
+  // Elevation has no attribute of its own: positions reach the shader as
+  // ECEF, so height comes from `POSITION_ABSOLUTE` projected onto the
+  // ellipsoid normal under the dataset's centre. Over a footprint this small
+  // the curvature that ignores is a few centimetres. The ramp spans the root
+  // tile's region heights, which are the header's Z range (Decision 6), from
+  // blue at the lowest point to red at the highest.
+  const centre = Cesium.Cartographic.fromCartesian(tileset.boundingSphere.center);
+  const ground = Cesium.Cartesian3.fromRadians(centre.longitude, centre.latitude, 0);
+  const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(ground, new Cesium.Cartesian3());
+  const { minimumHeight, maximumHeight } = tileset.root.boundingVolume;
+  const height =
+    `dot(\${POSITION_ABSOLUTE}, vec3(${up.x}, ${up.y}, ${up.z}))` +
+    ` - ${Cesium.Cartesian3.dot(ground, up) + minimumHeight}`;
+  const elevation = `clamp((${height}) / ${maximumHeight - minimumHeight}, 0.0, 1.0)`;
+  const intensity = '255.0 * sqrt(clamp(${Intensity} / 43000.0, 0.0, 1.0))';
+
+  const COLOURS = {
+    rgb: undefined,
+    byClass: {
+      conditions: [
+        ['${Classification} === 2', 'color("#a8794f")'],
+        ['${Classification} >= 3 && ${Classification} <= 5', 'color("#3f9142")'],
+        ['${Classification} === 6', 'color("#cf6a55")'],
+        ['${Classification} === 9', 'color("#3b7dd8")'],
+        ['true', 'color("#9aa0a6")'],
+      ],
+    },
+    intensity: `rgb(${intensity}, ${intensity}, ${intensity})`,
+    elevation: `hsl(0.66 * (1.0 - ${elevation}), 0.9, 0.5)`,
+  };
+  const SHOW = {
     all: undefined,
-    byClass: new Cesium.Cesium3DTileStyle({
-      color: {
-        conditions: [
-          ['${Classification} === 2', 'color("#a8794f")'],
-          ['${Classification} >= 3 && ${Classification} <= 5', 'color("#3f9142")'],
-          ['${Classification} === 6', 'color("#cf6a55")'],
-          ['${Classification} === 9', 'color("#3b7dd8")'],
-          ['true', 'color("#9aa0a6")'],
-        ],
-      },
-    }),
-    ground: new Cesium.Cesium3DTileStyle({ show: '${Classification} === 2' }),
-    noVegetation: new Cesium.Cesium3DTileStyle({
-      show: '${Classification} < 3 || ${Classification} > 5',
-    }),
+    ground: '${Classification} === 2',
+    noVegetation: '${Classification} < 3 || ${Classification} > 5',
   };
 
-  const filters = document.getElementById('filters');
-  filters.hidden = false;
-  filters.addEventListener('change', (event) => {
-    provider.tileset.style = STYLES[event.target.value];
+  // One style from both choices, rebuilt on every change: Cesium3DTileStyle
+  // takes colour and show together, and a style is cheap next to the shader
+  // recompile Cesium does for it anyway.
+  const panel = document.getElementById('panel');
+  const choice = (name) => panel.querySelector(`input[name="${name}"]:checked`).value;
+  panel.hidden = false;
+  panel.addEventListener('input', () => {
+    const color = COLOURS[choice('colour')];
+    const show = SHOW[choice('show')];
+    tileset.style =
+      color || show ? new Cesium.Cesium3DTileStyle({ color, show }) : undefined;
+    tileset.pointCloudShading.eyeDomeLighting = panel.querySelector('#edl').checked;
+    tileset.pointCloudShading.maximumAttenuation = Number(panel.querySelector('#size').value);
   });
 
   // The reading this page exists to show, refreshed on `postRender` rather than
