@@ -10,6 +10,19 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+### Added
+
+- Cesium 1.147 support. The peer range is `>=1.142.0 <1.148.0`. Widening it
+  took no code change: every assertion in `tests/cesium-contract.test.ts`
+  holds against 1.147.0 unaltered, and both ends of the range, 1.142.0 and
+  1.147.0, put 47 points and 20 lit pixels on a globe whose control run lights
+  none. On the codec path, `Resource.js` and `PntsLoader.js` are unchanged,
+  and the only behavioural change in `Cesium3DTile.js` is how an implicit
+  tileset creates its children; this library builds explicit tilesets. 1.147
+  also moves glTF utilities into a new `@cesium/gltf` package, which the
+  boundary check already covers: it rejects any `@cesium/*` import outside
+  `src/cesium-runtime/`.
+
 ## [1.0.1] — 2026-11-01
 
 Slow connections no longer lose tiles. No public API changed, and the Cesium
