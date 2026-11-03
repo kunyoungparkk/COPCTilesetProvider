@@ -6,8 +6,8 @@ Thanks for looking. Issues and pull requests are welcome at
 ## Running things
 
 Node **24 or newer** — `.nvmrc` pins it, so `nvm use` picks it up, and
-`engines` says the same so `npm install` warns rather than letting you find out
-later. Two things depend on that floor and neither is a preference. Three test
+`devEngines` says the same so `npm install` warns rather than letting you find
+out later. Two things depend on that floor and neither is a preference. Three test
 files start a real `node:worker_threads` Worker on a `.ts` entry point, so Node
 has to strip types without a flag; on anything older they fail with `Unknown
 file extension ".ts"` while the rest of the suite passes, which reads like a
