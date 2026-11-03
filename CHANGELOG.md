@@ -10,6 +10,10 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-11-03
+
+Installing no longer asks for a Node version. No public API changed.
+
 ### Changed
 
 - The package no longer declares `engines`. It said `>=24`, but Node 24 is what
@@ -351,7 +355,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v0.11.1...v1.0.0
