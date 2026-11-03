@@ -10,6 +10,15 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+### Changed
+
+- The package no longer declares `engines`. It said `>=24`, but Node 24 is what
+  developing and publishing this library needs, not what using it needs: the
+  library runs in the browser, and the floor made `npm install` warn on older
+  Node, or fail under `engine-strict`. The Node floor a consumer meets is now
+  Cesium's own. `devEngines` states Node 24 for contributors, and installing
+  the package does not read it.
+
 ## [1.1.0] — 2026-11-03
 
 Cesium 1.147 is supported. No public API changed.

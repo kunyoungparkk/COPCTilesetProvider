@@ -40,8 +40,12 @@
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=24"
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=24",
+      "onFail": "warn"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
