@@ -31,13 +31,58 @@ if (ionToken) Cesium.Ion.defaultAccessToken = ionToken;
 // options it would take to switch each of them off. Credits still render, which
 // is what keeps the imagery's attribution intact.
 const widget = new Cesium.CesiumWidget('globe', {
-  baseLayer: Cesium.ImageryLayer.fromProviderAsync(
-    Cesium.IonImageryProvider.fromAssetId(ION_IMAGERY_ASSET_ID),
-  ),
-  // Both of these need the ion token. Without one the globe comes up blank —
-  // fine, because a local run has no dataset to show over it either.
+  // Added by useBaseLayer below, so that a failing one can be swapped out.
+  baseLayer: false,
+  // Cesium's own asset, so the Google quota below does not reach it.
   terrain: Cesium.Terrain.fromWorldTerrain(),
 });
+
+// The globe's imagery, best first. Google's tiles reach the page through ion,
+// which fetches them from Google under its own key, and when that key's daily
+// quota runs out every tile comes back 429 and the globe is bare blue
+// (2026-11-03: "2D Tiles requests per day", the same on Cesium 1.146 and
+// 1.147). Bing also comes through ion, but not through Google's quota. Natural
+// Earth II ships inside Cesium, so no account or quota stands between it and
+// the page: blurry up close, never blank.
+const BASE_LAYERS = [
+  () =>
+    Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.IonImageryProvider.fromAssetId(ION_IMAGERY_ASSET_ID),
+    ),
+  () => Cesium.ImageryLayer.fromWorldImagery(),
+  () =>
+    Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.TileMapServiceImageryProvider.fromUrl(
+        Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'),
+      ),
+    ),
+];
+
+// One failure moves to the next layer: the provider not being created (no
+// token, ion unreachable) or any one of its tiles failing to load. A spent
+// quota fails every tile after the first, and a globe full of holes reads
+// worse than a plainer one that is whole. The warning stays because on
+// screen a fallback looks like nothing went wrong.
+function useBaseLayer(index) {
+  const layer = BASE_LAYERS[index]();
+  widget.imageryLayers.add(layer);
+  if (index === BASE_LAYERS.length - 1) return;
+
+  let failed = false;
+  const fallBack = (error) => {
+    // Tiles already in flight keep failing after the first one does.
+    if (failed) return;
+    failed = true;
+    console.warn('Base imagery failed; trying the next one.', error);
+    widget.imageryLayers.remove(layer);
+    useBaseLayer(index + 1);
+  };
+  layer.errorEvent.addEventListener(fallBack);
+  layer.readyEvent.addEventListener((provider) => {
+    provider.errorEvent.addEventListener(fallBack);
+  });
+}
+useBaseLayer(0);
 
 const out = document.getElementById('stats');
 

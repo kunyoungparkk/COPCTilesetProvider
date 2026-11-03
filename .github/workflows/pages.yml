@@ -35,7 +35,7 @@ jobs:
           TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
         run: |
           if [ -z "$TOKEN" ]; then
-            echo "No CESIUM_ION_TOKEN secret. The demo will use Natural Earth II."
+            echo "No CESIUM_ION_TOKEN secret. The demo cannot reach its Google imagery and will fall back."
             exit 0
           fi
           PAGE=examples/index.html

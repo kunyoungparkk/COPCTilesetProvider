@@ -83,9 +83,17 @@ token needs `assets:read` and access to asset `3830182` (Google Maps 2D
 Satellite); if it restricts origins, the Pages URL has to be one of its allowed
 URLs.
 
-There is no fallback. Without a working token the globe comes up blank, which
-is the same thing a local run gets, and a local run has no dataset to show over
-it either. Cesium logs the refusal; the demo does not dress it up.
+The imagery falls back; the terrain does not. Google's tiles reach the page
+through ion, which fetches them from Google under its own key, and when that
+key's daily quota runs out every tile comes back 429 and the globe is bare
+blue — it did on 2026-11-03. So `main.js` tries three base layers in order and
+moves on at the first failure: Google, then Bing Maps Aerial (also through ion,
+but not through Google's quota), then Natural Earth II, which ships inside
+Cesium and has no account or quota to run out — blurry up close, never blank.
+Without a token, which is every local run, the Google asset is out of reach and
+the page goes on down the list with the token Cesium ships with. The console says
+which layer failed and why. World Terrain is Cesium's own asset, so Google's
+quota does not reach it.
 
 ## Why it loads the published package
 

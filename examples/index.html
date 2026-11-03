@@ -77,8 +77,9 @@
          (.github/workflows/pages.yml). Empty here on purpose: a Cesium ion
          token is a public, client-side value, but keeping it out of git means
          rotating it costs a secret change rather than a commit. With it empty
-         — every local run — the demo uses the imagery bundled into Cesium
-         itself and never touches ion. -->
+         — every local run — the Google imagery, which belongs to the deploy
+         token's account, is out of reach, and main.js falls back to the next
+         base layer on its list. -->
     <script>window.CESIUM_ION_TOKEN = '';</script>
     <!-- One Cesium, reached by one specifier. The library imports `cesium` too,
          and `?external=cesium` keeps it a bare import, so it resolves through
