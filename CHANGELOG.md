@@ -12,12 +12,12 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ### Changed
 
-- `engines.node` is now `>=22.17.0`, down from `>=24`, which is Cesium's own
-  floor. Node 24 is what developing and publishing this library needs, not
-  what using it needs: the library runs in the browser, and the higher floor
-  made `npm install` warn on Node 22, or fail under `engine-strict`.
-  `devEngines` now states Node 24 for contributors, and installing the
-  package does not read it.
+- The package no longer declares `engines`. It said `>=24`, but Node 24 is what
+  developing and publishing this library needs, not what using it needs: the
+  library runs in the browser, and the floor made `npm install` warn on older
+  Node, or fail under `engine-strict`. The Node floor a consumer meets is now
+  Cesium's own. `devEngines` states Node 24 for contributors, and installing
+  the package does not read it.
 
 ## [1.1.0] — 2026-11-03
 
