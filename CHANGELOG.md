@@ -18,8 +18,9 @@ Installing no longer asks for a Node version. No public API changed.
 
 - The package no longer declares `engines`. It said `>=24`, but Node 24 is what
   developing and publishing this library needs, not what using it needs: the
-  library runs in the browser, and the floor made `npm install` warn on older
-  Node, or fail under `engine-strict`. The Node floor a consumer meets is now
+  library runs in the browser. On Node 22, `npm install copc-tileset-provider`
+  skipped every release that declared `>=24` and installed 0.3.0, the newest
+  one that did not, without a warning. The Node floor a consumer meets is now
   Cesium's own. `devEngines` states Node 24 for contributors, and installing
   the package does not read it.
 
