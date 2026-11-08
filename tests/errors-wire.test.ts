@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   CopcTilesetError,
-  CrsNotRegisteredError,
+  CrsDefinitionRequiredError,
   MalformedHierarchyError,
   WorkerTaskFailedError,
   ZeroPointChunkError,
@@ -20,14 +20,14 @@ const cloned = (wire: unknown) => structuredClone(wire) as ReturnType<typeof toW
 
 describe('toWire / fromWire', () => {
   it('rebuilds a library error as its own class, with its code and message', () => {
-    const original = new CrsNotRegisteredError(2992);
+    const original = new CrsDefinitionRequiredError(5174, 'datum-shift-unknown');
 
     const rebuilt = fromWire(cloned(toWire(original)));
 
-    expect(rebuilt).toBeInstanceOf(CrsNotRegisteredError);
-    expect(rebuilt.code).toBe('crs-not-registered');
+    expect(rebuilt).toBeInstanceOf(CrsDefinitionRequiredError);
+    expect(rebuilt.code).toBe('crs-definition-required');
     expect(rebuilt.message).toBe(original.message);
-    expect(rebuilt.name).toBe('CrsNotRegisteredError');
+    expect(rebuilt.name).toBe('CrsDefinitionRequiredError');
   });
 
   // The message is transported rather than recomposed. Constructors here take

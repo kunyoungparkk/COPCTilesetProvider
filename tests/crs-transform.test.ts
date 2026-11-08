@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
-import { geodeticToEcef, registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { WGS84_GEOGRAPHIC } from './epsg-wkt.js';
+import { geodeticToEcef, resolveCrsDefinition } from '../src/crs/index.js';
 // The Worker's entry point, imported here the way the Worker will import it.
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { CrsDefinitionUnusableError, CrsGeoidHeightNotFiniteError } from '../src/errors/index.js';
@@ -36,7 +37,6 @@ describe('both halves against the real file', () => {
     // Both halves, in the order the library runs them: the main thread
     // resolves a definition out of the WKT, and the Worker would build the
     // transform from that string alone.
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Horizontal placement only: both sides sit at height zero, which is the
@@ -60,7 +60,6 @@ describe('both halves against the real file', () => {
     // Both halves, in the order the library runs them: the main thread
     // resolves a definition out of the WKT, and the Worker would build the
     // transform from that string alone.
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     const corner = transform.toEcef(635_577.79, 848_882.15, 406.14);
@@ -79,7 +78,6 @@ describe('both halves against the real file', () => {
     // Both halves, in the order the library runs them: the main thread
     // resolves a definition out of the WKT, and the Worker would build the
     // transform from that string alone.
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Two points on one vertical line are exactly their height difference
@@ -96,7 +94,6 @@ describe('both halves against the real file', () => {
   });
 
   it('reports degrees and metres, from the same projection toEcef uses', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     const [longitude, latitude, height] = transform.toWgs84(635_577.79, 848_882.15, 406.14);
@@ -126,7 +123,6 @@ describe('both halves against the real file', () => {
   });
 
   it('agrees with toEcef, which is built on it', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Not a restatement of the implementation: `toEqual` is exact, so any
@@ -146,6 +142,25 @@ describe('both halves against the real file', () => {
   });
 });
 
+describe("the file's own WKT against the proj4 string it replaced", () => {
+  it('places every corner of the cube where OREGON does, heights included', async () => {
+    // Decision 6 trusts the file's horizontal node in place of a hand-written
+    // string; this is the measurement that says the two agree. z is in the
+    // cube's own feet, so it also checks the WKT's UNIT reaches the height.
+    const fromWkt = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
+    const fromString = createTransformFromDefinition(OREGON);
+
+    for (const x of [635_577.79, 640_233.3]) {
+      for (const y of [848_882.15, 853_537.66]) {
+        for (const z of [406.14, 5061.65]) {
+          const apart = metresApart(fromWkt.toEcef(x, y, z), fromString.toEcef(x, y, z));
+          expect(apart).toBeLessThan(0.001);
+        }
+      }
+    }
+  });
+});
+
 describe('createTransformFromDefinition where there is no usable linear unit', () => {
   it('leaves z in metres', () => {
     // A geographic system's coordinates are degrees and its heights are
@@ -153,6 +168,18 @@ describe('createTransformFromDefinition where there is no usable linear unit', (
     // has to fall back to one — a fallback nothing else here would notice
     // going wrong.
     const transform = createTransformFromDefinition('+proj=longlat +datum=WGS84 +no_defs');
+
+    const low = transform.toEcef(STADIUM.longitude, STADIUM.latitude, 0);
+    const high = transform.toEcef(STADIUM.longitude, STADIUM.latitude, 1000);
+
+    expect(metresApart(high, low)).toBeCloseTo(1000, 6);
+  });
+
+  it('leaves z in metres for a geographic WKT too', () => {
+    // proj4 sets a GEOGCS's `to_meter` to metres per degree at the equator,
+    // 111319.49 for this one. Read as a height unit, it would put a point
+    // 1000 m up some 111,000 km up instead.
+    const transform = createTransformFromDefinition(WGS84_GEOGRAPHIC);
 
     const low = transform.toEcef(STADIUM.longitude, STADIUM.latitude, 0);
     const high = transform.toEcef(STADIUM.longitude, STADIUM.latitude, 1000);
@@ -178,6 +205,33 @@ describe('createTransformFromDefinition where there is no usable linear unit', (
 });
 
 describe('createTransformFromDefinition refuses what it cannot carry across a realm', () => {
+  it('refuses a WKT naming a grid-shift table through its PROJ4 extension', () => {
+    // proj4 honours the extension's own proj4 string in place of the WKT
+    // around it, grids and all — so a WKT can fail the same way a
+    // `+nadgrids` string does.
+    const wkt =
+      'GEOGCS["NAD27",DATUM["North_American_Datum_1927",' +
+      'SPHEROID["Clarke 1866",6378206.4,294.978698213898]],PRIMEM["Greenwich",0],' +
+      'UNIT["degree",0.0174532925199433],' +
+      'EXTENSION["PROJ4","+proj=longlat +ellps=clrk66 +nadgrids=@conus +no_defs"]]';
+
+    expect(() => createTransformFromDefinition(wkt)).toThrow(
+      expect.objectContaining({ reason: 'grid-shift' }),
+    );
+  });
+
+  it("refuses a WKT proj4 cannot read, rather than throwing proj4's own value", () => {
+    // A caller's `crs` reaches proj4 through here and nothing else, so this is
+    // the only place an unreadable one can be caught typed.
+    expect(() => createTransformFromDefinition('PROJCS["x",GEOGCS["g"]]')).toThrow(
+      expect.objectContaining({ code: 'crs-definition-unusable', reason: 'unreadable' }),
+    );
+  });
+
+  it('builds a WKT proj4 can read', () => {
+    expect(() => createTransformFromDefinition(WGS84_GEOGRAPHIC)).not.toThrow();
+  });
+
   it('refuses a +nadgrids definition instead of returning a transform that answers NaN', () => {
     // Without this guard, building this transform does not throw at all —
     // proj4 defers grid lookup to `forward`, so the failure would only show
@@ -414,7 +468,6 @@ describe('geoid height', () => {
   const POINT = { x: 637290.75, y: 851209.9, z: 406.14 };
 
   it('moves a point by the geoid height it is given', async () => {
-    registerCrs(2992, OREGON);
     const definition = resolveCrsDefinition(await autzenWkt());
 
     const plain = createTransformFromDefinition(definition);
@@ -430,7 +483,6 @@ describe('geoid height', () => {
   });
 
   it('adds the geoid height after the linear unit, not before it', async () => {
-    registerCrs(2992, OREGON);
     const definition = resolveCrsDefinition(await autzenWkt());
 
     const [, , plainHeight] = createTransformFromDefinition(definition).toWgs84(
@@ -449,7 +501,6 @@ describe('geoid height', () => {
 
   // Every existing caller passes one argument. This is the guard that says so.
   it('changes nothing when it is not given', async () => {
-    registerCrs(2992, OREGON);
     const definition = resolveCrsDefinition(await autzenWkt());
 
     expect(createTransformFromDefinition(definition).toEcef(POINT.x, POINT.y, POINT.z)).toEqual(

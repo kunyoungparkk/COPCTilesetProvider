@@ -15,8 +15,6 @@ a 3D Tiles tileset, so it loads, caches and styles like any other.
 Point it at a URL and it renders:
 
 ```js
-COPCTilesetProvider.registerCrs(2992, '+proj=lcc +lat_0=41.75 +lon_0=-120.5 …');
-
 const provider = await COPCTilesetProvider.fromUrl(
   'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz',
 );
@@ -34,19 +32,9 @@ Cesium is a peer dependency, `>=1.142.0 <1.148.0`.
 
 ## Quick start
 
-Register the file's coordinate system before opening it — see
-[Coordinate systems](#coordinate-systems).
-
 ```js
 import { Viewer } from 'cesium';
 import { COPCTilesetProvider } from 'copc-tileset-provider';
-
-// EPSG:2992 — Oregon Statewide Lambert, the system Autzen is stored in.
-COPCTilesetProvider.registerCrs(
-  2992,
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-    '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs',
-);
 
 const viewer = new Viewer('cesiumContainer');
 
@@ -68,29 +56,33 @@ screenshot at the top.
 
 ## Coordinate systems
 
-Only **EPSG:4326** is known by default. Every other system has to be registered
-once, before the file is opened:
+The file says which coordinate system its points are in, and the library reads
+it from there. A file on WGS 84, NAD83, ETRS89, GDA2020, KGD2002, JGD2011, or
+any other datum EPSG publishes a zero shift to WGS 84 for, opens with nothing
+but its URL. That zero shift is EPSG's, not exact: measured against PROJ, every
+such system lands within 1.35 m, the furthest being NAD83's CSRS and HARN
+realizations.
 
-```js
-COPCTilesetProvider.registerCrs(2992, '<proj4 definition>');
+A file on an older datum — Korean 1985, DHDN, Amersfoort, OSGB 1936 — is
+refused. Reaching WGS 84 from it takes a shift the file does not state, and
+without one every point would land tens to hundreds of metres off with no
+error. The error names the system and the call that opens the file anyway:
+
+```
+This file uses EPSG:5174, whose datum needs a shift to reach WGS84 that the
+file does not state. […]
+
+    COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });
+
+The definition for EPSG:5174 is at https://epsg.io/5174 […]
 ```
 
-The library reads the EPSG code out of the file's WKT and uses the definition
-registered for it.
+`crs` takes a proj4 string or a WKT, and replaces the file's own description
+entirely. For an older datum it has to state the shift — in proj4, a
+`+towgs84=` term. Its accuracy is yours; this library applies what it is given.
 
-An unregistered system fails with an error that names it and hands you the call
-to paste, including where to find the definition:
-
-```
-This file uses EPSG:2992, which is not registered. […]
-
-    registerCrs(2992, '<proj4 definition>');
-
-The definition for EPSG:2992 is at https://epsg.io/2992 […]
-```
-
-A registered definition's accuracy is the registrant's; this library applies
-what it is given.
+A file whose description names no EPSG code is refused the same way, with
+`CrsCodeNotFoundError`; `crs` opens it too.
 
 ## Your server has to support Range requests
 
@@ -189,6 +181,7 @@ Opens the file and returns a provider, after reading only its metadata.
 | `spawnWorker` | bundled Worker | Supply your own Worker, as a `WorkerPort`. See [Limits](#limits). |
 | `fetch` | `globalThis.fetch` | Every Range request goes through this. Use it to add auth headers, sign URLs, or route through a proxy. |
 | `signal` | — | Aborts `fromUrl` while it is still opening the file. |
+| `crs` | the file's own | The file's horizontal coordinate system, as a proj4 string or WKT, used instead of the one the file declares. See [Coordinate systems](#coordinate-systems). |
 | `geoidHeight` | — (HAE) | The geoid's separation from the WGS84 ellipsoid at this file's location, in metres, added to every height. Omit it for a file whose Z is already ellipsoidal. See [Limits](#limits). |
 
 ### Provider
@@ -199,10 +192,6 @@ Opens the file and returns a provider, after reading only its metadata.
 | `extent` | `Rectangle` | The file's extent, for camera framing. |
 | `stats()` | `ProviderStats` | Request and loading counters, for diagnostics. |
 | `destroy()` | `void` | Releases the tileset and its Workers. Safe to call more than once. |
-
-### `COPCTilesetProvider.registerCrs(code, proj4Definition)`
-
-Registers one coordinate system for every file opened afterwards.
 
 ### `browserPort(worker)`
 

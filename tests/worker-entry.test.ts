@@ -1,7 +1,7 @@
 import { Las } from 'copc';
 import { describe, expect, it, vi } from 'vitest';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { fromWire, ZeroPointChunkError } from '../src/errors/index.js';
 import { createWorkerHandler } from '../src/worker/entry.js';
@@ -38,9 +38,8 @@ vi.mock('../src/worker/pnts.js', async (importOriginal) => {
   };
 });
 
-// Same proj4 definition tests/crs-transform.test.ts, tests/worker-positions.test.ts,
-// tests/worker-pnts.test.ts, and tests/worker-pipeline.test.ts register for
-// EPSG:2992 — Autzen's own horizontal system, in international feet.
+// Autzen's own horizontal system (EPSG:2992, international feet) as a proj4
+// string — the same one tests/crs-transform.test.ts uses.
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
@@ -74,7 +73,6 @@ async function loadNode() {
   if (entry === undefined) {
     throw new Error('fixtures/autzen-root-hierarchy.bin no longer has node 5-16-3-1');
   }
-  registerCrs(2992, OREGON);
   const definition = resolveCrsDefinition(await autzenWkt());
   return {
     header: {

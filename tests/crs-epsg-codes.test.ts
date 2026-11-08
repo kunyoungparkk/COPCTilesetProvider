@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
-import { findHorizontalEpsgCode, findVerticalEpsgCode } from '../src/crs/epsg-codes.js';
+import { findHorizontalCrs, findVerticalEpsgCode } from '../src/crs/epsg-codes.js';
 
-describe('findHorizontalEpsgCode against the real file', () => {
+// The code alone, which is all these tests are about; the datum code and the
+// WKT that come with it are `tests/crs-resolve.test.ts`'s.
+const horizontalCode = (wkt: string): number | null => findHorizontalCrs(wkt)?.code ?? null;
+
+describe('findHorizontalCrs against the real file', () => {
   // The whole reason this module exists. Autzen's WKT holds ten AUTHORITY
   // nodes; the horizontal one is neither the first nor the last.
   it('finds the projected system and not the vertical datum', async () => {
     const wkt = await autzenWkt();
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(2992);
+    expect(horizontalCode(wkt)).toBe(2992);
   });
 
   it('does not return any of the other nine codes', async () => {
-    const code = findHorizontalEpsgCode(await autzenWkt());
+    const code = horizontalCode(await autzenWkt());
 
     // 6360 is the vertical datum a trailing match finds; 7019 is the spheroid
     // a leading one finds; 4269 is the geographic system nested inside PROJCS.
@@ -20,18 +24,18 @@ describe('findHorizontalEpsgCode against the real file', () => {
   });
 });
 
-describe('findHorizontalEpsgCode on constructed systems', () => {
+describe('findHorizontalCrs on constructed systems', () => {
   it('reads a bare projected system', () => {
     const wkt = 'PROJCS["x",GEOGCS["g",AUTHORITY["EPSG","4269"]],AUTHORITY["EPSG","2992"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(2992);
+    expect(horizontalCode(wkt)).toBe(2992);
   });
 
   // A geographic file has no PROJCS, and then GEOGCS is the horizontal system.
   it('falls back to the geographic system when there is no projected one', () => {
     const wkt = 'GEOGCS["WGS 84",DATUM["d",AUTHORITY["EPSG","6326"]],AUTHORITY["EPSG","4326"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(4326);
+    expect(horizontalCode(wkt)).toBe(4326);
   });
 
   // The coordinates here are Lambert, in feet. Answering with the geographic
@@ -41,7 +45,7 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
     const wkt =
       'PROJCS["Oregon",GEOGCS["NAD83",AUTHORITY["EPSG","4269"]],AUTHORITY["ESRI","102726"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBeNull();
+    expect(horizontalCode(wkt)).toBeNull();
   });
 
   it('takes the projected system when a compound holds both orders', () => {
@@ -49,7 +53,7 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
       'COMPD_CS["c",VERT_CS["v",AUTHORITY["EPSG","6360"]],' +
       'PROJCS["p",AUTHORITY["EPSG","2992"]]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(2992);
+    expect(horizontalCode(wkt)).toBe(2992);
   });
 
   // The tie-break is keyword-scoped, and the pinned file reaches it only
@@ -62,7 +66,7 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
       'COMPD_CS["c",GEOGCS["a",AUTHORITY["EPSG","4269"]],' +
       'GEOGCS["b",AUTHORITY["EPSG","4326"]]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(4326);
+    expect(horizontalCode(wkt)).toBe(4326);
   });
 
   // A system's name is free text, so a bracket inside one must not be counted
@@ -70,7 +74,7 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
   it('is not confused by a bracket inside a quoted name', () => {
     const wkt = 'PROJCS["Oregon ]draft",AUTHORITY["EPSG","2992"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(2992);
+    expect(horizontalCode(wkt)).toBe(2992);
   });
 
   // Formatted WKT puts a line break between a keyword and its bracket, which
@@ -80,13 +84,13 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
       'PROJCS ["x",\n  GEOGCS ["g",\n    AUTHORITY ["EPSG", "4269"]],\n' +
       '  AUTHORITY ["EPSG", "2992"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBe(2992);
+    expect(horizontalCode(wkt)).toBe(2992);
   });
 
   it('ignores an authority that is not EPSG', () => {
     const wkt = 'PROJCS["x",AUTHORITY["ESRI","102726"]]';
 
-    expect(findHorizontalEpsgCode(wkt)).toBeNull();
+    expect(horizontalCode(wkt)).toBeNull();
   });
 
   it.each([
@@ -95,7 +99,7 @@ describe('findHorizontalEpsgCode on constructed systems', () => {
     ['a vertical system alone', 'VERT_CS["v",AUTHORITY["EPSG","6360"]]'],
     ['text that is not WKT', 'not wkt at all'],
   ])('returns null for %s', (_label, wkt) => {
-    expect(findHorizontalEpsgCode(wkt)).toBeNull();
+    expect(horizontalCode(wkt)).toBeNull();
   });
 });
 

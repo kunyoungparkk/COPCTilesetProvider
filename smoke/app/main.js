@@ -4,10 +4,6 @@
 import { Color, Viewer } from 'cesium';
 import { COPCTilesetProvider } from 'copc-tileset-provider';
 
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 // Counting pixels only means anything against a black sky: the Decision 2 gate
 // found the starfield alone doubled its count.
 function blackout(viewer) {
@@ -61,7 +57,6 @@ window.smoke = {
       return { litPixels: litPixels(viewer.scene.canvas), pointsLength: 0, tilesLoaded: true };
     }
 
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     // No second argument. This line is the whole point of the sub-project: no
     // spawnWorker, no wasm to serve, no adapter to write.
     const provider = await COPCTilesetProvider.fromUrl(

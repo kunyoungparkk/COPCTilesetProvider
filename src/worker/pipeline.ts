@@ -34,19 +34,18 @@ export interface EncodeNodeInput {
  * Nothing here resolves a coordinate system — that is the boundary this file
  * exists to hold, and taking an already-built transform is the strongest form
  * of it. `resolveCrsDefinition` runs once, on the main thread, at `fromUrl`
- * time, and throws `CrsNotRegisteredError` and `CrsCodeNotFoundError` — errors
- * that have to surface where `fromUrl` can reject. Decision 3 gives a Worker
- * its own copy of module state, so calling it inside a Worker would see none
- * of what the caller registered (rejecting every real file) and the same throw
- * would arrive at the caller as an opaque `messageerror` rather than a typed
- * rejection. Only the resolved answer — a plain string a postMessage can carry
- * — crosses the realm boundary, and `entry.ts` turns it into the transform
- * this takes, importing `createTransformFromDefinition` from
- * `../crs/worker.js`, which cannot reach the registry or the resolver
- * (`tests/crs-worker-boundary.test.ts`). `tests/worker-boundary.test.ts` walks
- * the import closure of this module, of that entry, and of the bundle's own
- * entry the same way, so an import that reaches either one fails the suite
- * rather than only failing in a browser Worker.
+ * time, and throws `CrsDefinitionRequiredError` and `CrsCodeNotFoundError` —
+ * errors that have to surface where `fromUrl` can reject. Thrown inside a
+ * Worker, the same error would arrive at the caller as an opaque
+ * `messageerror` rather than a typed rejection. Only the resolved answer — a
+ * plain string a postMessage can carry — crosses the realm boundary, and
+ * `entry.ts` turns it into the transform this takes, importing
+ * `createTransformFromDefinition` from `../crs/worker.js`, which cannot reach
+ * the resolver (`tests/crs-worker-boundary.test.ts`).
+ * `tests/worker-boundary.test.ts` walks the import closure of this module, of
+ * that entry, and of the bundle's own entry the same way, so an import that
+ * reaches the resolver fails the suite rather than only failing in a browser
+ * Worker.
  */
 export async function encodeNode(input: EncodeNodeInput): Promise<ArrayBuffer> {
   const view = await decodeChunk(input.compressed, input.header, input.pointCount);

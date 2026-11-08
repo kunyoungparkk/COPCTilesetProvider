@@ -32,7 +32,7 @@ export const srcRelative = (file: string): string => relative(SRC, file).replace
  * A specifier like that cannot be followed statically, and pretending
  * otherwise is how a walker starts lying: `tests/worker-boundary.test.ts`
  * and `tests/crs-worker-boundary.test.ts` exist to assert that a Worker-realm
- * entry point cannot reach the CRS registry, and a specifier this scanner
+ * entry point cannot reach the CRS resolver, and a specifier this scanner
  * silently skipped would let that reach happen while the test stayed green.
  * Measured against this file's own predecessor (a plain regex): adding
  * `await import(\`../crs/registry.js\`)` inside `src/worker/pipeline.ts` made

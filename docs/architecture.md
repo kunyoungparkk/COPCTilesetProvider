@@ -62,7 +62,7 @@ Each has its own README with the detail; this is the index.
 |---|---|
 | [`src/copc`](../src/copc) | Reading the file's own structure — header, info VLR, hierarchy pages — into the node descriptors every other module works from. |
 | [`src/range`](../src/range) | Verified HTTP Range transport. Every read proves itself with an exact `206` and `Content-Range`; adjacent chunks are coalesced into one request. |
-| [`src/crs`](../src/crs) | The coordinate pipeline: WKT → EPSG code → registered proj4 definition → WGS84 → ECEF. |
+| [`src/crs`](../src/crs) | The coordinate pipeline: the file's WKT (or the caller's `crs`) → horizontal system → WGS84 → ECEF, and the rule for when the file's own WKT is enough. |
 | [`src/tileset`](../src/tileset) | Mapping the octree onto a synthetic 3D Tiles document, and the registry that turns a tile's opaque URI back into a byte range. |
 | [`src/worker`](../src/worker) | Two realms in one directory: the pipeline that runs inside a Worker, and the pool on the main thread that feeds it. |
 | [`src/budget`](../src/budget) | Admission control over Range body bytes, host request slots and decode jobs — admitted, deferred or rejected — with every reservation released exactly once. |
@@ -82,9 +82,10 @@ deliberate, and the failure message says which boundary was crossed.
    specifier, and separately confirms `src/index.ts` still reaches the provider
    and the Worker pool — so the rule cannot be satisfied by the library simply
    falling apart.
-2. **A Worker may not reach the CRS registry.** The registry is module state,
-   and a Worker gets its own empty copy — so consulting it there would reject
-   every real file. What crosses the realm boundary is the *answer*: a proj4
+2. **A Worker may not reach the CRS resolver.** The resolver decides whether
+   a file's own WKT is enough to place its points, and its refusals have to
+   reject `fromUrl` — thrown inside a Worker, they would reach the caller as an
+   opaque `messageerror`. What crosses the realm boundary is the *answer*: a
    definition string, resolved once on the main thread. Enforced by
    `tests/crs-worker-boundary.test.ts`.
 3. **A Worker may not reach Cesium.** The Worker entry point imports nothing
@@ -123,8 +124,9 @@ decision changed first, not worked around.
    today.)
 6. **Synthetic tileset and encoding conventions.** `ADD` refinement, geometric
    error halving with depth, RTC-relative float32 positions, PNTS with a batch
-   table, WGS84 region bounding volumes, and a CRS registry seeded with
-   EPSG:4326 alone.
+   table, WGS84 region bounding volumes, and the file's own horizontal WKT as
+   its coordinate system — trusted only on a datum EPSG publishes a zero shift
+   to WGS 84 for, and otherwise refused until the caller passes `crs`.
 
 ## What is measured, and where it is written down
 

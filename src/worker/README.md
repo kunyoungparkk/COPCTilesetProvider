@@ -62,9 +62,9 @@ realm's own barrel (the pipeline), and the main-thread realm's file is
 since it is the file a bootstrap loads into a real Worker.
 `tests/worker-boundary.test.ts` walks its import closure and asserts it
 reaches `pipeline.ts`, `decode.ts`, and `crs/transform.ts`, but never
-`crs/registry.ts`, `crs/resolve.ts`, or `crs/index.ts` — the CRS registry is
-main-thread-only module state, and a Worker's own copy would hold none of
-what the caller registered — and never `pool.ts`: a Worker that pulled the
+`crs/resolve.ts` or `crs/index.ts` — the CRS resolver's refusals have to
+reject `fromUrl`, which they cannot do from inside a Worker — and never
+`pool.ts`: a Worker that pulled the
 main thread's pool in would carry the main thread's half of the system into
 every Worker, and nothing else would notice.
 

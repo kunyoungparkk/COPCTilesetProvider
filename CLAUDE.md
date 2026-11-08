@@ -49,7 +49,7 @@ Every artifact must be reviewable and continuable by a stranger:
 - English: code, comments, commit messages, error messages, README, API docs.
 - Korean: OVERVIEW.md and internal planning documents. Do not translate them.
 - Error messages are part of the API (OVERVIEW §3, Decision 6): include the
-  extracted EPSG code and a copy-paste-ready `registerCrs` call.
+  extracted EPSG code and a copy-paste-ready `fromUrl(url, { crs })` call.
 
 ## Conventions
 

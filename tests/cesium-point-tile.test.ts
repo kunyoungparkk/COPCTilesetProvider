@@ -18,12 +18,6 @@ import { createNodeWorkerPort } from './worker-port-node.js';
  * clone, so a mis-wiring is invisible until a chunk is actually decoded.
  */
 
-// Same proj4 definition every other suite registers for Autzen's own
-// horizontal system (EPSG:2992, international feet).
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 const FILE_URL = 'https://point-tile-host.example/autzen.copc.laz';
 
 // Node 5-16-3-1's own chunk, at the offset and length the pinned root
@@ -57,7 +51,6 @@ afterEach(() => {
 
 describe('a point tile through the composition fromUrl builds', () => {
   it('spawns a real Worker, decodes the pinned chunk, and returns Cesium point content', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
       spawnWorker: createNodeWorkerPort,
       fetch: autzenFetch(),

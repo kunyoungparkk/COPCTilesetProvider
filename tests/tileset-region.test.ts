@@ -3,13 +3,10 @@ import type { Bounds } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
 import { fixtureBytes } from './fixtures.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import type { CrsTransform } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { regionForKey } from '../src/tileset/region.js';
-
-const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 const DEGREES = 180 / Math.PI;
 
@@ -22,7 +19,6 @@ const autzenInfo = () => Info.parse(head().subarray(429, 429 + 160));
 const autzenHeader = () => Las.Header.parse(head().subarray(0, 375));
 
 const transformFor = async (): Promise<CrsTransform> => {
-  registerCrs(2992, OREGON);
   return createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 };
 

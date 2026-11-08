@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createBudget } from '../src/budget/index.js';
 
 // The host registry (src/budget/host-registry.ts) is process-wide module
-// state, shared with every other test file however vitest is isolating them —
-// see tests/crs-registry.test.ts for the same pattern with the CRS registry.
+// state, shared with every other test file however vitest is isolating them.
 // A fresh, unique origin per test keeps these tests independent of that state.
 function uniqueOrigin(): string {
   return `https://budget-verdicts-${crypto.randomUUID()}.example`;

@@ -3,7 +3,7 @@ import type { View } from 'copc';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { PositionCountMismatchError } from '../src/errors/index.js';
 import { decodeChunk } from '../src/worker/decode.js';
@@ -13,13 +13,6 @@ import { toRelativePositions } from '../src/worker/positions.js';
 import { autzenWkt } from './autzen-wkt.js';
 import { bufferReader } from './fake-reader.js';
 import { fixtureBytes as fixture } from './fixtures.js';
-
-// Same proj4 definition tests/crs-transform.test.ts and
-// tests/worker-positions.test.ts register for EPSG:2992 — Autzen's own
-// horizontal system, in international feet.
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 // Half a float32's relative spacing (2**-23 is the gap between 1 and the
 // next representable float32) — the bound on one round-to-nearest error.
@@ -196,7 +189,6 @@ describe('encodePnts', () => {
     const view = await decodeChunk(fixture('autzen-node-5-16-3-1.bin'), header, entry.pointCount);
     pointCount = view.pointCount;
 
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     const placed = toRelativePositions(view, transform);

@@ -11,13 +11,14 @@ import * as crsWorkerModule from '../src/crs/worker.js';
 import * as poolModule from '../src/worker/pool.js';
 import type { WorkerPort } from '../src/worker/pool.js';
 import { autzenWkt } from './autzen-wkt.js';
+import { KOREAN_1985_MODIFIED_CENTRAL_BELT } from './epsg-wkt.js';
 import { FILE_URL, fixtureBytes, fixtureFetch, TOTAL_BYTES } from './fixtures.js';
 
 const load = fixtureBytes;
 
-// Same proj4 definition every other suite registers for Autzen's own
-// horizontal system (EPSG:2992, international feet) — `tests/crs-transform.test.ts`,
-// `tests/cesium-codec.test.ts`.
+// Autzen's own horizontal system (EPSG:2992, international feet) as a proj4
+// string, the shape a caller passes as `crs` — the same one
+// `tests/crs-transform.test.ts` uses.
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
@@ -114,7 +115,6 @@ afterEach(() => {
 
 describe('COPCTilesetProvider.fromUrl', () => {
   it('issues exactly three requests before the tileset exists (§4)', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch, ranges } = autzenFetch();
 
     await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -126,16 +126,34 @@ describe('COPCTilesetProvider.fromUrl', () => {
     expect(ranges).toEqual(['bytes=0-588', 'bytes=375-1735', 'bytes=81114146-81123041']);
   });
 
-  it('rejects with CrsNotRegisteredError, carrying the code and a copy-pasteable registerCrs call', async () => {
-    const wkt = 'PROJCS["somewhere",AUTHORITY["EPSG","88888"]]';
+  it('rejects with CrsDefinitionRequiredError, carrying the code and a copy-pasteable crs call', async () => {
+    const wkt = KOREAN_1985_MODIFIED_CENTRAL_BELT;
 
     await expect(
       COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch: autzenFetchWithWkt(wkt).fetch }),
-    ).rejects.toMatchObject({ code: 'crs-not-registered', epsgCode: 88_888 });
+    ).rejects.toMatchObject({ code: 'crs-definition-required', epsgCode: 5174 });
 
     await expect(
       COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch: autzenFetchWithWkt(wkt).fetch }),
-    ).rejects.toThrow("\n    registerCrs(88888, '");
+    ).rejects.toThrow("\n    COPCTilesetProvider.fromUrl(url, { crs: '");
+  });
+
+  // The fix both CRS errors name has to work on the very file each refuses.
+  it('opens a file it would refuse once crs is passed, and hands that definition on', async () => {
+    const poolSpy = vi.spyOn(poolModule, 'createWorkerPool');
+    try {
+      for (const wkt of [KOREAN_1985_MODIFIED_CENTRAL_BELT, 'PROJCS["x",UNIT["foot",0.3048]]']) {
+        await COPCTilesetProvider.fromUrl(FILE_URL, {
+          spawnWorker,
+          fetch: autzenFetchWithWkt(wkt).fetch,
+          crs: OREGON,
+        });
+      }
+
+      expect(poolSpy.mock.calls.map((call) => call[0].definition)).toEqual([OREGON, OREGON]);
+    } finally {
+      poolSpy.mockRestore();
+    }
   });
 
   it('rejects with CrsCodeNotFoundError when the WKT names no horizontal authority', async () => {
@@ -147,7 +165,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('refuses a relative url before issuing a single request', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch, ranges } = autzenFetch();
 
     // Measured before this check existed: all three bootstrap requests
@@ -170,7 +187,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('gives two providers built from the same file different tokenBase values', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const one = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch: autzenFetch().fetch });
     const other = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch: autzenFetch().fetch });
 
@@ -184,7 +200,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('reaches the tileset through a ScheduledRangeResource, not a plain one', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetch();
 
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -199,7 +214,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('installs the codec on _runtimeContentCodec', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetch();
 
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -213,7 +227,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('fetches the root tile content through the real tileset, live registry, and shared budget', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch, ranges } = autzenFetchWithRootChunk();
 
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -256,7 +269,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   // all — measured by mutation, handing `InterceptContext` the bare reader
   // instead breaks nothing else in this suite.
   it('merges two tiles requested in one tick into a single Range request', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch, ranges } = fixtureFetch([
       { offset: 0, bytes: HEAD },
       { offset: 375, bytes: VLRS },
@@ -300,7 +312,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   // never inherit a neighbour's failure. Here the two tiles are far enough
   // apart to plan into separate groups, and only one of them is served.
   it('answers a tile whose group succeeded even when another group in the batch failed', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch, ranges } = fixtureFetch([
       { offset: 0, bytes: HEAD },
       { offset: 375, bytes: VLRS },
@@ -345,7 +356,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   // cannot tell. A provider that derived its origin from anything else would
   // sail past a full host.
   it('admits a tile against the origin the file came from, not some other one', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetchWithRootChunk();
     // Its own host, because the registry is keyed by origin and the first
     // call for one fixes its capacity for the whole process — another test
@@ -363,8 +373,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('constructs Cesium3DTileset and the Worker pool with the options this design specifies', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
-
     const tilesetSpy = vi.spyOn(Cesium3DTileset, 'fromUrl');
     const poolSpy = vi.spyOn(poolModule, 'createWorkerPool');
     try {
@@ -376,11 +384,14 @@ describe('COPCTilesetProvider.fromUrl', () => {
         skipLevelOfDetail: false,
         maximumScreenSpaceError: 16,
       });
-      // The resolved proj4 definition, not a WGS84 fallback — this is the
-      // main-thread-resolution handoff Decision 3 exists to make; and §7's
-      // default pool size, taken here rather than from `tileset` (which
-      // knows nothing about the Worker pool at all).
-      expect(poolSpy.mock.calls[0]?.[0]).toMatchObject({ definition: OREGON, size: 4 });
+      // The definition resolved from the file's own WKT, not a WGS84
+      // fallback — this is the main-thread-resolution handoff Decision 3
+      // exists to make; and §7's default pool size, taken here rather than
+      // from `tileset` (which knows nothing about the Worker pool at all).
+      expect(poolSpy.mock.calls[0]?.[0]).toMatchObject({
+        definition: resolveCrsDefinition(await autzenWkt()),
+        size: 4,
+      });
     } finally {
       tilesetSpy.mockRestore();
       poolSpy.mockRestore();
@@ -416,7 +427,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it("computes extent from the header's measured min/max, not the octree cube", async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetch();
 
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -457,8 +467,6 @@ describe('COPCTilesetProvider.fromUrl', () => {
   });
 
   it('passes a non-default maximumScreenSpaceError through to the tileset', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
-
     // 4, not 16: §7's own default is also Cesium's own default
     // (`Cesium3DTileset.js`'s own `options.skipLevelOfDetail ?? false`-style
     // fallback), so asserting the default value alone cannot fail even
@@ -561,7 +569,6 @@ describe('what the registry numbers measure', () => {
   }
 
   it('counts the registry live, and a page expansion moves both numbers', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { page, key } = rootWithPagePointer();
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
       spawnWorker: () => {
@@ -620,7 +627,6 @@ describe('what the registry numbers measure', () => {
 
 describe('fromUrl and the caller signal', () => {
   it('lets the caller abort the reads fromUrl makes', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const controller = new AbortController();
     controller.abort();
 
@@ -638,7 +644,6 @@ describe('fromUrl and the caller signal', () => {
   it('loads normally when no signal is given', async () => {
     // Without this the assertion above would pass on a `fromUrl` that always
     // rejected.
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
       spawnWorker: () => {
         throw new Error('no Worker is spawned by this test');
@@ -651,7 +656,6 @@ describe('fromUrl and the caller signal', () => {
 
 describe('geoidHeight', () => {
   it('hands the same geoid height to both realms', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     // Neither spy below takes `.mockImplementation`, so both call through:
     // `fromUrl` needs the real pool and the real transform (bounding volumes
     // and the root geometric error both come from the latter), and a bare
@@ -685,7 +689,6 @@ describe('geoidHeight', () => {
   // are geoid-referenced and a caller who said nothing is a mismatch worth
   // naming — but not worth refusing, since the caller may not know N.
   it('warns when the file declares a vertical system and no height was given', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetch();
 
     await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch });
@@ -702,7 +705,6 @@ describe('geoidHeight', () => {
   // falsy-but-given value that a `geoidHeight !== undefined` guard has to
   // tell apart from "not given", unlike a bare `if (geoidHeight)` check.
   it.each([-23.333, 0])('stays quiet when the caller gave a height (%s)', async (geoidHeight) => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = autzenFetch();
 
     await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch, geoidHeight });
@@ -713,8 +715,8 @@ describe('geoidHeight', () => {
   // A file with no vertical system has said nothing about its heights, so
   // there is nothing to correct and nothing to warn about.
   it('stays quiet when the file declares no vertical system', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
-    const wkt = 'PROJCS["Oregon",GEOGCS["NAD83",AUTHORITY["EPSG","4269"]],AUTHORITY["EPSG","2992"]]';
+    // Autzen's own horizontal system, without the compound around it.
+    const wkt = resolveCrsDefinition(await autzenWkt());
 
     await COPCTilesetProvider.fromUrl(FILE_URL, {
       spawnWorker,

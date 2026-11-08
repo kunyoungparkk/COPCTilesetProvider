@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createBudget } from '../src/budget/index.js';
 
 // Process-wide module state, shared across every test file — see the same
-// note in tests/budget-verdicts.test.ts and tests/crs-registry.test.ts.
+// note in tests/budget-verdicts.test.ts.
 function uniqueOrigin(): string {
   return `https://budget-atomicity-${crypto.randomUUID()}.example`;
 }

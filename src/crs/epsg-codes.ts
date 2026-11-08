@@ -1,27 +1,36 @@
 /**
- * Finds the EPSG code of the file's horizontal coordinate system.
+ * The file's horizontal coordinate system: its EPSG code, the EPSG code of
+ * the datum it sits on, and the WKT of that system alone.
  *
- * Decision 6 extracts a code and resolves it against a registry rather than
- * handing whole WKT to proj4, which is unpredictable across compound systems
- * and dialects. The pinned Autzen file shows the shape of the problem: it
- * carries ten AUTHORITY nodes, and the horizontal one is neither the first (a
- * spheroid) nor the last (a vertical datum).
+ * Decision 6 names the code in every CRS error, so the caller knows which
+ * definition to look up. The pinned Autzen file shows why finding it takes
+ * care: it carries ten AUTHORITY nodes, and the horizontal one is neither the
+ * first (a spheroid) nor the last (a vertical datum). The rule is therefore
+ * structural — the authority that is a *direct child* of the horizontal
+ * system — which needs bracket depth, not pattern matching. The vertical
+ * system is a separate question, asked by `findVerticalEpsgCode` off the same
+ * walk.
  *
- * The rule is therefore structural — the authority that is a *direct child* of
- * the horizontal system — which needs bracket depth, not pattern matching.
- * The vertical system is a separate question, asked by `findVerticalEpsgCode`
- * off the same walk.
+ * The WKT is the `PROJCS` node when there is one, else the `GEOGCS` node —
+ * cut out of a compound, so a vertical system never reaches proj4. Measured
+ * on proj4 2.21: every compound WKT1 and WKT2 tried throws, Autzen's
+ * included, and the horizontal node alone projects Autzen exactly as the
+ * hand-written definition it replaced did.
  *
  * Returns `null` when there is no such code; the caller decides what that means.
  */
-export function findHorizontalEpsgCode(wkt: string): number | null {
-  const { found, sawProjected } = scanAuthorities(wkt);
+export function findHorizontalCrs(
+  wkt: string,
+): { code: number; datumCode: number | null; wkt: string } | null {
+  const { found, spans, sawProjected } = scanAuthorities(wkt);
+  const datumCode = found.get('DATUM') ?? null;
 
   // A file that has a projected system has its coordinates in that system, so
   // its code is the answer whenever it names one.
   const projected = found.get('PROJCS');
-  if (projected !== undefined) {
-    return projected;
+  const projectedWkt = spans.get('PROJCS');
+  if (projected !== undefined && projectedWkt !== undefined) {
+    return { code: projected, datumCode, wkt: projectedWkt };
   }
 
   // When it names none — an ESRI authority, say — the answer is nothing. The
@@ -34,7 +43,12 @@ export function findHorizontalEpsgCode(wkt: string): number | null {
   }
 
   // With no projected system at all, the geographic one genuinely is horizontal.
-  return found.get('GEOGCS') ?? null;
+  const geographic = found.get('GEOGCS');
+  const geographicWkt = spans.get('GEOGCS');
+  if (geographic === undefined || geographicWkt === undefined) {
+    return null;
+  }
+  return { code: geographic, datumCode, wkt: geographicWkt };
 }
 
 /**
@@ -54,23 +68,31 @@ export function findVerticalEpsgCode(wkt: string): number | null {
 
 /**
  * Every EPSG code the WKT carries, keyed by the keyword its AUTHORITY node
- * sits directly inside — `PROJCS`, `GEOGCS`, `VERT_CS`, and whatever else the
- * file names.
+ * sits directly inside — `PROJCS`, `GEOGCS`, `DATUM`, `VERT_CS`, and whatever
+ * else the file names — and the text of its horizontal system's nodes.
  *
  * Keyed by parent rather than collected in order because a code's meaning is
  * its position: Autzen's WKT holds ten AUTHORITY nodes, and 2992, 4269, 6360
  * and 5103 are all in there saying different things. The horizontal reader and
  * the vertical one are two questions asked of one walk.
  */
-function scanAuthorities(wkt: string): { found: Map<string, number>; sawProjected: boolean } {
+function scanAuthorities(wkt: string): {
+  found: Map<string, number>;
+  spans: Map<string, string>;
+  sawProjected: boolean;
+} {
   // Keyed by the keyword each authority sits directly inside, so the horizontal
   // system's own code is distinguishable from the ones its parts carry.
   const found = new Map<string, number>();
-  const open: { keyword: string; body: number }[] = [];
+  // The text of the first PROJCS and the first GEOGCS node to close, keyword
+  // to closing bracket. A GEOGCS nested in a PROJCS closes first, which is
+  // harmless: it is only read back when the file has no PROJCS.
+  const spans = new Map<string, string>();
+  const open: { keyword: string; start: number; body: number }[] = [];
   let quoted = false;
   // Tracked separately from `found`, because "the file has a projected system"
   // and "that system names an EPSG code" are different facts with different
-  // answers — see how findHorizontalEpsgCode resolves the two.
+  // answers — see how findHorizontalCrs resolves the two.
   let sawProjected = false;
 
   for (let i = 0; i < wkt.length; i++) {
@@ -87,9 +109,10 @@ function scanAuthorities(wkt: string): { found: Map<string, number>; sawProjecte
     }
 
     if (character === '[') {
-      const keyword = keywordBefore(wkt, i);
+      const start = keywordStart(wkt, i);
+      const keyword = wkt.slice(start, i).trimEnd();
       sawProjected ||= keyword === 'PROJCS';
-      open.push({ keyword, body: i + 1 });
+      open.push({ keyword, start, body: i + 1 });
       continue;
     }
     if (character !== ']') {
@@ -97,7 +120,13 @@ function scanAuthorities(wkt: string): { found: Map<string, number>; sawProjecte
     }
 
     const node = open.pop();
-    if (node === undefined || node.keyword !== 'AUTHORITY') {
+    if (node === undefined) {
+      continue;
+    }
+    if ((node.keyword === 'PROJCS' || node.keyword === 'GEOGCS') && !spans.has(node.keyword)) {
+      spans.set(node.keyword, wkt.slice(node.start, i + 1));
+    }
+    if (node.keyword !== 'AUTHORITY') {
       continue;
     }
 
@@ -118,11 +147,15 @@ function scanAuthorities(wkt: string): { found: Map<string, number>; sawProjecte
     }
   }
 
-  return { found, sawProjected };
+  return { found, spans, sawProjected };
 }
 
-/** The bare keyword preceding a bracket, e.g. `AUTHORITY` in `AUTHORITY[`. */
-function keywordBefore(wkt: string, bracket: number): string {
+/**
+ * Where the bare keyword preceding a bracket starts, e.g. the `A` of
+ * `AUTHORITY[`. The keyword is the text from there to the bracket, less any
+ * whitespace before it.
+ */
+function keywordStart(wkt: string, bracket: number): number {
   // Formatted WKT breaks the line between a keyword and its bracket. Reading
   // that as a nameless node would report a file that names its system perfectly
   // well as naming none, and send the user off to rewrite a file that is fine.
@@ -135,7 +168,7 @@ function keywordBefore(wkt: string, bracket: number): string {
   while (start > 0 && /[A-Z_]/.test(wkt[start - 1] ?? '')) {
     start--;
   }
-  return wkt.slice(start, end);
+  return start;
 }
 
 const EPSG_BODY = /^\s*"?EPSG"?\s*,\s*"?(\d+)"?\s*$/;
