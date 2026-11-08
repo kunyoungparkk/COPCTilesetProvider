@@ -7,10 +7,6 @@ import { COPCTilesetProvider } from 'copc-tileset-provider';
 // this page to work.
 const FILE_URL = 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz';
 
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 // Geoid height at Autzen (44.0587, -123.0687), from NOAA's NGS geoid service.
 // Autzen's Z is NAVD88 orthometric, so without this the points sit that far
 // above the terrain they were surveyed on. The value belongs to this dataset's
@@ -92,8 +88,6 @@ const out = document.getElementById('stats');
 let stopCounting;
 
 try {
-  COPCTilesetProvider.registerCrs(2992, OREGON);
-
   const provider = await COPCTilesetProvider.fromUrl(FILE_URL, {
     geoidHeight: AUTZEN_GEOID_HEIGHT,
   });
@@ -214,7 +208,7 @@ try {
 } catch (error) {
   stopCounting?.();
   // Verbatim. Every failure this library raises is a typed error whose message
-  // names the fix — a missing CRS registration prints the registerCrs call to
+  // names the fix — a file on a datum it cannot place prints the `crs` call to
   // paste, a server that hides Content-Range prints the header to add.
   // Rewriting them here would throw that away.
   out.textContent = error instanceof Error ? error.message : String(error);
