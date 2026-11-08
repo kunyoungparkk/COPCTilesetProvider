@@ -10,9 +10,11 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-11-08
+
 The coordinate system is read from the file. `registerCrs` is gone: most files
 open with `fromUrl(url)` alone, and the rest take their definition as a `crs`
-option. This breaks the public API, so it waits for 2.0.
+option. This breaks the public API, hence the major version.
 
 ### Removed
 
@@ -401,7 +403,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.0...v1.0.1
