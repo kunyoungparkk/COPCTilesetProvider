@@ -1,12 +1,12 @@
 /**
- * The entry point that keeps the registry out of a Worker's reach — a
+ * The entry point that keeps the resolver out of a Worker's reach — a
  * statement about what this barrel carries, not about where the builder runs.
  *
- * Decision 3 runs the transform in a Worker, where module state is a fresh
- * copy: a registry consulted there holds only the default EPSG:4326 however
- * much the caller registered, and `resolveCrsDefinition` would reject every
- * real file. Keeping those out of reach is a job for the entry point rather
- * than for a rule — a Worker importing this barrel cannot reach them, and
+ * Decision 3 runs the transform in a Worker. `resolveCrsDefinition` has to
+ * stay on the main thread, where its typed errors can reject `fromUrl`; in a
+ * Worker they would arrive as an opaque `messageerror`. Keeping it out of
+ * reach is a job for the entry point rather than for a rule — a Worker
+ * importing this barrel cannot reach it, and
  * `tests/crs-worker-boundary.test.ts` walks what it can reach to keep that so.
  *
  * `createTransformFromDefinition` itself is realm-free, and main-thread

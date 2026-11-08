@@ -9,12 +9,6 @@ import type { WorkerPort } from '../src/worker/pool.js';
 import { fixtureBytes as load, fixtureFetch } from './fixtures.js';
 import { encodeHierarchyPage } from './hierarchy-page.js';
 
-// Same proj4 definition tests/cesium-provider.test.ts and tests/cesium-codec.test.ts
-// register for Autzen's own horizontal system (EPSG:2992, international feet).
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 const HEAD = load('autzen-head.bin');
 const VLRS = load('autzen-vlrs.bin');
 const ROOT_HIERARCHY = load('autzen-root-hierarchy.bin');
@@ -38,7 +32,6 @@ const spawnWorker = (): WorkerPort => {
  * assumptions when the suite runs `--no-isolate`.
  */
 async function buildProvider(host: string): Promise<COPCTilesetProvider> {
-  COPCTilesetProvider.registerCrs(2992, OREGON);
   return COPCTilesetProvider.fromUrl(`https://${host}/autzen.copc.laz`, {
     spawnWorker,
     fetch: autzenFetch(),
@@ -436,7 +429,6 @@ describe('the multi-page fixture: a hierarchy sub-page expanded through the inst
     provider: COPCTilesetProvider;
     hierarchyResource: Resource;
   }> {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     const { fetch } = fixtureFetch([
       { offset: 0, bytes: headWithSmallRootHierarchy() },
       { offset: 375, bytes: VLRS },

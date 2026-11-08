@@ -4,7 +4,7 @@ import type { Budget, BudgetStats } from '../budget/index.js';
 import { createBudget } from '../budget/index.js';
 import type { CopcFile } from '../copc/index.js';
 import { openCopc } from '../copc/index.js';
-import { findVerticalEpsgCode, registerCrs, resolveCrsDefinition } from '../crs/index.js';
+import { findVerticalEpsgCode, resolveCrsDefinition } from '../crs/index.js';
 import type { CrsTransform } from '../crs/index.js';
 import { createTransformFromDefinition } from '../crs/worker.js';
 import { InvalidSourceUrlError, InvalidTokenBaseError } from '../errors/index.js';
@@ -84,6 +84,20 @@ export interface COPCTilesetProviderOptions {
    */
   readonly signal?: AbortSignal;
   /**
+   * The file's horizontal coordinate system, as a proj4 parameter string or
+   * as WKT, used in place of whatever the file declares (Decision 6).
+   *
+   * Most files need none: `fromUrl` reads the system out of the file's own
+   * WKT. It refuses where that is not enough to place the points without a
+   * guess, and names this option in the error: a datum that needs a shift
+   * the file does not state (`CrsDefinitionRequiredError`), a WKT proj4
+   * cannot read (the same error), or no readable EPSG code at all
+   * (`CrsCodeNotFoundError`). For a datum shift, the definition has to state
+   * it — in proj4, a `+towgs84=` term. Its accuracy is the caller's to vouch
+   * for; this library applies what it is given.
+   */
+  readonly crs?: string;
+  /**
    * The geoid's separation from the WGS84 ellipsoid at this file's location,
    * in metres, added to every height — `h = H + N`, so this is N as geodesy
    * publishes it (negative across North America). Omit it for a file whose Z
@@ -91,8 +105,8 @@ export interface COPCTilesetProviderOptions {
    *
    * One constant, so it is right only over an extent small enough that the
    * separation does not vary across it — a survey site, not a continent. Its
-   * accuracy is the caller's to vouch for, the way a registered CRS
-   * definition's is (Decision 6).
+   * accuracy is the caller's to vouch for, the way a `crs` definition's is
+   * (Decision 6).
    */
   readonly geoidHeight?: number;
 }
@@ -308,25 +322,15 @@ export class COPCTilesetProvider {
   }
 
   /**
-   * Teaches this process one coordinate system (Decision 6). A static method
-   * because it must be callable before `fromUrl` even exists — the README's
-   * first example is written `registerCrs` then `fromUrl`, to document that
-   * order.
-   */
-  static registerCrs(code: number, definition: string): void {
-    registerCrs(code, definition);
-  }
-
-  /**
    * Opens a COPC file and returns the primitive that streams it.
    *
    * The order follows OVERVIEW §4 and Decision 2: a reader and a budget; the
    * three requests `openCopc` needs; the file's coordinate system, resolved
-   * here on the main thread because its two failure modes
-   * (`CrsCodeNotFoundError`, `CrsNotRegisteredError`) have to reject this
-   * call rather than surface inside a Worker that holds none of what a
-   * caller registered; the root geometric error and a fresh `tokenBase`; the
-   * synthetic tileset document and its registry; a Blob URL for that
+   * here on the main thread because its failures (`CrsCodeNotFoundError`,
+   * `CrsDefinitionRequiredError`) have to reject this call rather than
+   * surface inside a Worker as an opaque `messageerror`; the root geometric
+   * error and a fresh `tokenBase`; the synthetic tileset document and its
+   * registry; a Blob URL for that
    * document, fetched through a `ScheduledRangeResource` so Cesium's own
    * `getDerivedResource`/`clone` keep every tile's content resource inside
    * this class rather than downgrading to a plain `Resource` (see that
@@ -366,7 +370,9 @@ export class COPCTilesetProvider {
 
     const file = await openCopc(reader, options.signal);
 
-    const definition = resolveCrsDefinition(file.wkt);
+    // A caller's `crs` replaces the file's own description outright, so a file
+    // whose WKT would be refused, or that has none, still opens with it.
+    const definition = options.crs ?? resolveCrsDefinition(file.wkt);
     const transform = createTransformFromDefinition(definition, options.geoidHeight);
 
     warnIfHeightsAreUncorrected(file.wkt, options.geoidHeight, file.header, transform);

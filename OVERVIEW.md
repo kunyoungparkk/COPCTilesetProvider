@@ -144,21 +144,36 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
   ready에 도달하지 못해 tilesLoaded가 영구 대기한다.
   우리 구조에선 분류 필터가 GPU 스타일 단계라 0점 디코드 자체가 나올 수 없다.
   나오면 정책 문제가 아니라 버그이므로 typed error로 시끄럽게 실패한다.
-- **CRS = 내부 Map으로 관리. 기본 등록은 EPSG:4326 하나.** 파일 WKT에서 EPSG AUTHORITY 코드만 추출해 CRS Map에서 찾고, 변환에는 CRS Map의 proj4 정의를 쓴다.
-  WKT 전문을 proj4에 직접 먹이지 않는다 — 방언에 따라 throw하거나(실측: Autzen compound),
-  datum 정보 누락 시 조용히 틀리거나, 어느 쪽일지 예측할 수 없다. 등록된 정의만이
-  누군가 정확성을 보증한 입력이다.
-  - 확장: `registerCrs(code, proj4정의)` 정적 메서드. 등록된 정의의 정확성은
-    등록자 책임. 어떤 좌표계가 들어올지 예측할 수 없으므로 부분적 기본 등록
-    대신 규칙 하나로 통일한다 — "4326이 아니면 등록".
-  - 미등록 코드·코드 추출 실패는 typed error로 거부한다. 에러는 API의 일부다:
-    파일에서 추출한 코드와, 그 코드를 끼운 복사-실행 가능한 registerCrs
-    호출문을 포함할 것. (추출 실패 시엔 파일 재작성을 안내)
-  - 데모·README의 첫 예제는 registerCrs → fromUrl 순서로 작성해 이 규칙
-    자체를 문서화한다. 변환 정확성 테스트는 등록 정의 → 4326 → ECEF
-    파이프라인을 기준점 좌표의 PDAL 정답과 대조하는 방식으로 고정한다. (Autzen의 코드·정의는 WKT 실측으로 확정)
+- **CRS = 파일 WKT의 수평 좌표계. 단, datum 이동이 0으로 공표된 경우만 믿는다.**
+  파일 WKT에서 수평 노드(`PROJCS`, 없으면 `GEOGCS`)만 잘라 proj4에 넘긴다.
+  WKT 전문(복합 좌표계)은 proj4에 먹이지 않는다 — throw한다(실측: Autzen compound,
+  표본 29개 좌표계의 WKT1·WKT2 복합 전부). 수평 노드만 넘기면 Autzen에서 손으로 쓴
+  proj4 정의와 차이가 0 m다.
+  남는 위험은 datum 정보 누락 시 조용히 틀리는 것 하나다: WKT가 이동값을 적지 않으면
+  proj4는 이동 없이 변환한다. 그래서 수평 좌표계의 datum이 EPSG가 WGS 84로
+  0-파라미터 변환을 공표한 datum(`src/crs/null-shift-datums.ts`, EPSG v12.029 기준
+  112개 + WGS 84)일 때만 파일 WKT를 믿는다. 타원체로는 가를 수 없다 — VN-2000은
+  WGS 84 타원체 위에 있는데도 이동 없이 225 m 어긋난다.
+  실측(2026-11-08, proj4 2.21 대 PROJ 9.8.1, EPSG 투영·지리 2D 좌표계 5,198개):
+  이 규칙으로 자동 해석되는 3,143개는 전부 1.35 m 이내다. 거절되는 2,020개 중
+  1,775개는 자동이었다면 PROJ가 공표한 정확도 밖으로 어긋났다(Korean 1985 379 m,
+  DHDN 160 m, Amersfoort 114 m). v1의 규칙("4326이 아니면 `registerCrs`로 등록")은
+  이 실측으로 2.0에서 은퇴했다.
+  - 덮어쓰기: `fromUrl(url, { crs })` 옵션. proj4 문자열이나 WKT를 받아 파일의 선언을
+    통째로 대신한다. 정확성은 넘긴 쪽 책임. 파일마다 넘기므로 전역 상태가 없다.
+  - 거절은 typed error다. 에러는 API의 일부다: 파일에서 추출한 EPSG 코드, 그 코드의
+    epsg.io 주소, 복사-실행 가능한 `fromUrl(url, { crs: … })` 호출문을 포함할 것.
+    datum 이동 미상·WKT 판독 불가는 `CrsDefinitionRequiredError`, 코드 추출 실패는
+    `CrsCodeNotFoundError`(파일 재작성도 함께 안내).
+  - epsg.io 자동 조회는 하지 않는다. 실행 중 외부 서비스에 기대면 폐쇄망에서
+    동작하지 않고, 정작 필요한 구측지계에서도 정확하지 않다(실측: epsg.io의
+    EPSG:5174 proj4 문자열은 PROJ 대비 15 m — Molodensky-Badekas의 회전 중심이
+    proj4 문자열로 표현되지 않는다).
+  - 데모·README의 첫 예제는 `fromUrl` 한 줄이다(§1의 약속). `crs`는 거절 에러가
+    안내하는 자리에서만 등장한다. 변환 정확성 테스트는 파일 WKT → 4326 → ECEF
+    파이프라인을 기준점 좌표의 PDAL 정답과 대조하는 방식으로 고정한다.
   - 수직: 파일의 `VERT_CS` 코드는 경고 판단에만 쓴다. 높이 보정은 `geoidHeight`
-    옵션이 받은 상수 하나이고, 정확성은 등록자 책임이라는 같은 규칙을 따른다.
+    옵션이 받은 상수 하나이고, 정확성은 넘긴 쪽 책임이라는 같은 규칙을 따른다.
 - **boundingVolume = WGS84 region.** 노드 큐브의 XY 변을 등간격 샘플링해
   보수적 경위도 범위를 만들고(비선형 투영의 변 중간 극값 포함), 높이는 옥트리
   큐브의 z를 헤더의 실측 z 범위 안으로 clamp한 값 — 헤더 범위도 모든 점을 담으므로
@@ -198,7 +213,7 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
     결정 2의 경계 정적 검사를 typescript-eslint·ts-morph 위에 지을 수 없다.
     린터(Biome·oxlint)를 들이는 대신 스캐너를 직접 썼다 —
     `tests/import-closure.ts`가 import 지정자를 훑고, 경계 테스트 세 개가 그 위에
-    서 있다(Cesium·CRS 레지스트리·Worker 풀). 의존성이 늘지 않고 스위트 안에서
+    서 있다(Cesium·CRS 해석기·Worker 풀). 의존성이 늘지 않고 스위트 안에서
     돌아 CI가 이미 게이트다. 대가는 그 스캐너를 우리가 유지해야 한다는 것이고,
     그래서 스캐너 자신에게도 테스트 파일이 있다.
     계약 문자열 검사는 파일 문자열 탐색이라 영향받지 않는다.

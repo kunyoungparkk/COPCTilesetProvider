@@ -5,16 +5,13 @@ import { bufferReader } from './fake-reader.js';
 import { fixtureBytes } from './fixtures.js';
 import { hierarchyPageOf } from './hierarchy-page.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import type { CrsTransform } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { buildTileset } from '../src/tileset/build.js';
 import type { TileJson } from '../src/tileset/build.js';
 import { buildTileTree, keyText } from '../src/tileset/tree.js';
 import type { TileNode } from '../src/tileset/tree.js';
-
-const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 const DEGREES = 180 / Math.PI;
 
@@ -32,7 +29,6 @@ const contextFor = async (transform: CrsTransform) => ({
 });
 
 const transformFor = async (): Promise<CrsTransform> => {
-  registerCrs(2992, OREGON);
   return createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 };
 

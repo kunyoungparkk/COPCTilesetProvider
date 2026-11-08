@@ -2,22 +2,18 @@ import { Las } from 'copc';
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
 import { fixtureBytes } from './fixtures.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import {
   geometricErrorAtDepth,
   measureRootGeometricError,
 } from '../src/tileset/geometric-error.js';
 
-const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 const autzenHeader = (): Pick<Las.Header, 'min' | 'max'> =>
   Las.Header.parse(fixtureBytes('autzen-head.bin').subarray(0, 375));
 
 describe('measureRootGeometricError', () => {
   it('divides the largest measured metre span by sixteen', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Derivation, re-runnable by hand from the fixture's own header:
@@ -39,7 +35,6 @@ describe('measureRootGeometricError', () => {
   });
 
   it('takes the vertical span when the data is taller than it is wide', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Decision 6 takes the larger of horizontal and vertical so that a
@@ -56,7 +51,6 @@ describe('measureRootGeometricError', () => {
   });
 
   it('takes the horizontal span along x when it is the largest', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // Neither test above makes the x span (the first `Math.max` argument)
@@ -84,7 +78,6 @@ describe('measureRootGeometricError', () => {
 
 describe('geometricErrorAtDepth', () => {
   it('halves once per depth', async () => {
-    registerCrs(2992, OREGON);
     const transform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
     // Read from measureRootGeometricError rather than copied as a literal, so
     // a change to that function's own output cannot silently drift out of

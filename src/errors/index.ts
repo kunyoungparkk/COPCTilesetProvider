@@ -9,9 +9,9 @@ export {
 } from './copc.js';
 export {
   CrsCodeNotFoundError,
+  CrsDefinitionRequiredError,
   CrsDefinitionUnusableError,
   CrsGeoidHeightNotFiniteError,
-  CrsNotRegisteredError,
 } from './crs.js';
 export {
   InvalidSourceUrlError,

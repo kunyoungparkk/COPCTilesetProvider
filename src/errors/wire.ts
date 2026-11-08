@@ -9,9 +9,9 @@ import {
 } from './copc.js';
 import {
   CrsCodeNotFoundError,
+  CrsDefinitionRequiredError,
   CrsDefinitionUnusableError,
   CrsGeoidHeightNotFiniteError,
-  CrsNotRegisteredError,
 } from './crs.js';
 import {
   InvalidSourceUrlError,
@@ -59,9 +59,9 @@ const BY_CODE: ReadonlyMap<string, { readonly prototype: CopcTilesetError }> = n
   ['content-range-mismatch', ContentRangeMismatchError],
   ['content-range-unreadable', ContentRangeUnreadableError],
   ['crs-code-not-found', CrsCodeNotFoundError],
+  ['crs-definition-required', CrsDefinitionRequiredError],
   ['crs-definition-unusable', CrsDefinitionUnusableError],
   ['crs-geoid-height-not-finite', CrsGeoidHeightNotFiniteError],
-  ['crs-not-registered', CrsNotRegisteredError],
   ['decode-job-not-admitted', DecodeJobNotAdmittedError],
   ['invalid-byte-range', InvalidByteRangeError],
   ['invalid-source-url', InvalidSourceUrlError],

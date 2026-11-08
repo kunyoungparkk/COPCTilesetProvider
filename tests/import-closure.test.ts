@@ -8,7 +8,7 @@ const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 
 // This module backs both tests/worker-boundary.test.ts and
 // tests/crs-worker-boundary.test.ts, which assert a Worker-realm entry point
-// cannot reach the CRS registry. That claim is only as good as this
+// cannot reach the CRS resolver. That claim is only as good as this
 // scanner's own comment/string/template awareness — a walker that mistook
 // commented-out or quoted text for real code would either miss a genuine
 // leak (false negative) or flag an innocent file (false positive), and

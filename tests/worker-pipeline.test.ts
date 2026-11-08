@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import type { CrsTransform } from '../src/crs/worker.js';
 import { ZeroPointChunkError } from '../src/errors/index.js';
@@ -11,13 +11,6 @@ import { encodeNode } from '../src/worker/pipeline.js';
 import { autzenWkt } from './autzen-wkt.js';
 import { bufferReader } from './fake-reader.js';
 import { fixtureBytes as fixture } from './fixtures.js';
-
-// Same proj4 definition tests/crs-transform.test.ts, tests/worker-positions.test.ts,
-// and tests/worker-pnts.test.ts register for EPSG:2992 — Autzen's own
-// horizontal system, in international feet.
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 // Cesium's engine ships as @cesium/engine, but this project only declares a
 // peer on `cesium` (OVERVIEW §5) — @cesium/engine is present solely as a
@@ -81,7 +74,6 @@ describe('encodeNode', () => {
     compressed = fixture('autzen-node-5-16-3-1.bin');
     pointCount = entry.pointCount;
 
-    registerCrs(2992, OREGON);
     definition = resolveCrsDefinition(await autzenWkt());
     transform = createTransformFromDefinition(definition);
   });

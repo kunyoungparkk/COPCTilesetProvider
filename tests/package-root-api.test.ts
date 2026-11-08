@@ -26,8 +26,8 @@ import { fixtureBytes as load, fixtureFetch } from './fixtures.js';
  * tarball installed into a real project.
  */
 
-// Same proj4 definition every other suite registers for Autzen's own
-// horizontal system (EPSG:2992, international feet).
+// Autzen's own horizontal system (EPSG:2992, international feet) as a proj4
+// string — the same one `tests/crs-transform.test.ts` uses.
 const OREGON =
   '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
   '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
@@ -103,7 +103,6 @@ describe('the package as declared', () => {
   });
 
   it('accepts that port as fromUrl’s required spawnWorker option, and types the stats it returns', async () => {
-    COPCTilesetProvider.registerCrs(2992, OREGON);
     // Annotated, not inferred: the annotation is what proves `spawnWorker`
     // above satisfies the declared option type rather than merely being
     // shaped enough to pass at the call site.

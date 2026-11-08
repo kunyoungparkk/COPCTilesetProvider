@@ -245,19 +245,19 @@ describe('CrsDefinitionUnusableError', () => {
     expect(message).toContain('Expand');
   });
 
-  it('hands over a runnable registerCrs call for a bare EPSG code, like its sibling', () => {
+  it('hands over a runnable crs call for a bare EPSG code, like its sibling', () => {
     const message = new CrsDefinitionUnusableError('EPSG:2992', 'alias').message;
 
-    // Decision 6: the extracted code, inside a runnable call — the same
-    // pattern CrsNotRegisteredError's own test pins.
-    expect(message).toContain('registerCrs(2992,');
+    // Decision 6: the extracted code, beside a runnable call — the same
+    // pattern CrsDefinitionRequiredError's own test pins.
+    expect(message).toContain("\n    COPCTilesetProvider.fromUrl(url, { crs: '");
     expect(message).toContain('epsg.io/2992');
   });
 
   it('falls back to prose for a name with no code to extract', () => {
     const message = new CrsDefinitionUnusableError('GOOGLE', 'alias').message;
 
-    expect(message).not.toContain('registerCrs(');
+    expect(message).not.toContain('fromUrl(');
   });
 
   it('falls back to prose for an EPSG code buried in a longer string', () => {
@@ -265,7 +265,15 @@ describe('CrsDefinitionUnusableError', () => {
     // no single code to hand back a call for.
     const message = new CrsDefinitionUnusableError('EPSG:2992 +units=ft', 'alias').message;
 
-    expect(message).not.toContain('registerCrs(');
+    expect(message).not.toContain('fromUrl(');
+  });
+
+  it('tells an unreadable WKT to be replaced by parameters', () => {
+    const error = new CrsDefinitionUnusableError('PROJCS["x",GEOGCS["g"]]', 'unreadable');
+
+    expect(error.reason).toBe('unreadable');
+    expect(error.message).toContain('PROJCS["x",GEOGCS["g"]]');
+    expect(error.message).toContain('+proj=');
   });
 
   it("gives missing-projection its own reason, not alias's", () => {

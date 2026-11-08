@@ -15,8 +15,7 @@ describe('what a Worker can reach through worker/pipeline.ts', () => {
     expect(reachable).toContain('worker/pnts.ts');
   });
 
-  it('cannot reach the registry, the resolver, or the main-thread barrel', () => {
-    expect(reachable).not.toContain('crs/registry.ts');
+  it('cannot reach the resolver or the main-thread barrel', () => {
     expect(reachable).not.toContain('crs/resolve.ts');
     expect(reachable).not.toContain('crs/index.ts');
   });
@@ -35,8 +34,7 @@ describe('what a Worker can reach through the worker barrel', () => {
     expect(reachable).toContain('crs/transform.ts');
   });
 
-  it('cannot reach the registry, the resolver, or the main-thread barrel', () => {
-    expect(reachable).not.toContain('crs/registry.ts');
+  it('cannot reach the resolver or the main-thread barrel', () => {
     expect(reachable).not.toContain('crs/resolve.ts');
     expect(reachable).not.toContain('crs/index.ts');
   });
@@ -58,8 +56,7 @@ describe('what a Worker can reach through worker/entry.ts', () => {
     expect(reachable).toContain('crs/transform.ts');
   });
 
-  it('cannot reach the registry or the main-thread barrel', () => {
-    expect(reachable).not.toContain('crs/registry.ts');
+  it('cannot reach the resolver or the main-thread barrel', () => {
     expect(reachable).not.toContain('crs/resolve.ts');
     expect(reachable).not.toContain('crs/index.ts');
   });
@@ -86,8 +83,7 @@ describe('what a Worker can reach through worker/browser.ts', () => {
     expect(reachable).toContain('worker/decode.ts');
   });
 
-  it('cannot reach the registry, the resolver, or the main-thread barrel', () => {
-    expect(reachable).not.toContain('crs/registry.ts');
+  it('cannot reach the resolver or the main-thread barrel', () => {
     expect(reachable).not.toContain('crs/resolve.ts');
     expect(reachable).not.toContain('crs/index.ts');
   });

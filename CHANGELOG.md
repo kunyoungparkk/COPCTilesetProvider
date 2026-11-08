@@ -10,6 +10,51 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+The coordinate system is read from the file. `registerCrs` is gone: most files
+open with `fromUrl(url)` alone, and the rest take their definition as a `crs`
+option. This breaks the public API, so it waits for 2.0.
+
+### Removed
+
+- **Breaking:** `COPCTilesetProvider.registerCrs` and `CrsNotRegisteredError`.
+  Every file not in EPSG:4326 had to be registered, even where its own WKT
+  already said everything needed to place it. To migrate, delete the
+  `registerCrs` call. If `fromUrl` then refuses the file, pass the definition
+  you registered as `fromUrl(url, { crs: definition })`.
+
+### Added
+
+- `crs` option on `fromUrl`: a proj4 string or a WKT that replaces the file's
+  own description of its horizontal system. It is given per file, so there is
+  no process-wide state.
+- `CrsDefinitionRequiredError` (`crs-definition-required`), carrying
+  `epsgCode` and `reason`: `'datum-shift-unknown'` for a datum EPSG publishes
+  no zero shift to WGS 84 for, `'wkt-unreadable'` for a file WKT proj4 cannot
+  parse. Its message has the `crs` call to paste and the code's epsg.io page.
+- `CrsDefinitionUnusableError` gains the reason `'unreadable'`, for a `crs`
+  WKT proj4 cannot parse.
+
+### Changed
+
+- The horizontal system comes from the file's WKT. Only its `PROJCS` node, or
+  `GEOGCS` where there is none, reaches proj4: proj4 2.21 throws on the
+  compound WKT COPC writers store. And the file is trusted only when that
+  system's datum is one EPSG publishes a zero shift to WGS 84 for — 112 datums
+  and WGS 84 itself, from EPSG v12.029. proj4 applies no shift a WKT does not
+  state, so on any other datum every point would land off with no error:
+  Korean 1985 by 379 m, DHDN by 160 m, VN-2000 by 225 m though it sits on the
+  WGS 84 ellipsoid. Measured against PROJ 9.8.1 over the 5,198 EPSG projected
+  and geographic 2D systems it gives a non-ballpark answer for, the 3,143 this
+  rule opens all land within 1.35 m, the furthest being NAD83's CSRS and HARN
+  realizations.
+- A definition can be WKT. 1.x refused one as an `'alias'`. A WKT whose
+  `EXTENSION["PROJ4", …]` names a `+nadgrids` table is refused as
+  `'grid-shift'`, as the proj4 string form already was, and a geographic WKT
+  keeps its heights in metres rather than taking proj4's `to_meter` of one
+  degree on the equator.
+- `CrsCodeNotFoundError`'s message offers the `crs` option alongside
+  re-writing the file.
+
 ## [1.1.1] — 2026-11-03
 
 Installing no longer asks for a Node version. No public API changed.

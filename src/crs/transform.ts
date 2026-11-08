@@ -2,9 +2,9 @@ import proj4 from 'proj4';
 import { CrsDefinitionUnusableError, CrsGeoidHeightNotFiniteError } from '../errors/index.js';
 import { geodeticToEcef } from './ecef.js';
 
-// Restated rather than read out of the registry: 4326 is registered as a
-// convenience the caller may replace, and where these coordinates end up is not
-// theirs to redefine.
+// Where every file's coordinates end up. Written as parameters rather than
+// proj4's built-in `WGS84` alias, which `rejectUnusableDefinition` would
+// refuse in anyone else's definition.
 const WGS84 = '+proj=longlat +datum=WGS84 +no_defs';
 
 export interface CrsTransform {
@@ -37,22 +37,35 @@ export interface CrsTransform {
  * proj4 converts the horizontal pair and hands z back untouched, so the height
  * has to be scaled here or a file in feet arrives claiming to be in metres —
  * 282 metres too high, for this module's own pinned file. Taking the unit from
- * the registered definition takes it from where the horizontal pair already
- * took it. The file's vertical system would be more exactly right and needs the
- * WKT structure walk Decision 6 does without; where the two disagree, as they
+ * the definition takes it from where the horizontal pair already took it. The
+ * file's vertical system would be more exactly right and needs the WKT
+ * structure walk Decision 6 does without; where the two disagree, as they
  * do on the pinned file, it is an international foot against a US survey foot —
  * two parts per million.
  *
  * proj4 2.21 sets `to_meter` only where the definition names a non-metre linear
- * unit — measured: 0.3048 for `+units=ft`, absent for `+units=m`, for a bare
- * projection, and for `+proj=longlat`. Where it is absent the height is taken
- * to be metres already: right for the first two, and a guess for a geographic
- * definition, whose degrees say nothing about the unit its heights are in.
+ * unit — measured: 0.3048 for `+units=ft` and for a WKT `UNIT["foot",0.3048]`,
+ * absent for `+units=m`, for a bare projection, and for `+proj=longlat`. Where
+ * it is absent the height is taken to be metres already: right for the first
+ * two, and a guess for a geographic definition, whose degrees say nothing
+ * about the unit its heights are in.
+ *
+ * A geographic WKT is the exception that has to be caught by hand: proj4 sets
+ * its `to_meter` to metres per degree at the equator — measured, 111319.49
+ * for EPSG:4326's own `GEOGCS` — which would put every height 111 km up.
+ * Geographic definitions therefore take metres too, whichever form they
+ * arrive in.
  */
 function metresPerUnit(definition: string): number {
-  // Absent from proj4's published `Projection` type, so the field has to be
+  // Absent from proj4's published `Projection` type, so the fields have to be
   // reached for by hand rather than read off the interface.
-  const projection = new proj4.Proj(definition) as unknown as { to_meter?: number };
+  const projection = new proj4.Proj(definition) as unknown as {
+    projName?: string;
+    to_meter?: number;
+  };
+  if (projection.projName === 'longlat') {
+    return 1;
+  }
   // Falsy rather than undefined, matching how proj4 itself reads the field: a
   // definition carrying `+to_meter=0` projects normally there, and would
   // otherwise flatten every height in this file to zero here.
@@ -74,19 +87,18 @@ function rejectUnusableGeoidHeight(geoidHeight: number): void {
  * Builds a file's transform: `toWgs84` for degrees and metres, `toEcef` for
  * ECEF metres, both off the one projection built here.
  *
- * Takes a proj4 definition rather than the file's WKT, which is Decision 6's
- * order split across Decision 3's realm boundary: `resolveCrsDefinition` reads
- * the WKT and consults the registry on the main thread, and only its answer
- * reaches here — handed over directly by a main-thread caller, or posted to a
- * Worker. Nothing in this file reaches for the registry, and `worker.ts`
- * is the entry point that keeps it that way — a rule about imports would not,
- * so `tests/crs-worker-boundary.test.ts` walks what that entry can reach.
+ * Takes a resolved definition rather than the file's WKT, which is Decision
+ * 6's order split across Decision 3's realm boundary: `resolveCrsDefinition`
+ * reads the WKT on the main thread, and only its answer reaches here — handed
+ * over directly by a main-thread caller, or posted to a Worker. Nothing in
+ * this file reaches for the resolver, and `worker.ts` is the entry point that
+ * keeps it that way — a rule about imports would not, so
+ * `tests/crs-worker-boundary.test.ts` walks what that entry can reach.
  *
- * Whole WKT still never reaches proj4. The reason is that which dialects a
- * given proj4 build parses is not predictable, while a registered definition
- * is the one input someone vouched for. (Measured on the pinned file: feeding
- * its compound WKT to proj4 throws, and feeding its PROJCS subtree alone
- * projects correctly — so what is at stake here is unpredictability.)
+ * The definition is either the WKT of the file's horizontal system alone —
+ * never the whole compound, which proj4 2.21 cannot parse — or the proj4
+ * string or WKT a caller passed as `crs`. `resolveCrsDefinition`'s own comment
+ * says when the file's WKT is trusted on its own.
  *
  * OVERVIEW §6 keeps heights ellipsoidal by default — a datum offset, not a
  * unit — so z is scaled into metres and, absent a `geoidHeight` correction,
@@ -103,7 +115,7 @@ function rejectUnusableGeoidHeight(geoidHeight: number): void {
  * datum offset and not a unit: a file in feet still takes its correction in
  * metres. Zero, the default, is the ellipsoidal-height assumption every caller
  * had before the option existed. Its accuracy is the caller's to vouch for,
- * the way a registered definition's is (Decision 6), and one constant is only
+ * the way a `crs` definition's is (Decision 6), and one constant is only
  * right over an extent small enough that N does not vary across it.
  */
 export function createTransformFromDefinition(
@@ -231,12 +243,8 @@ function parseTerms(definition: string): Map<string, string | true> {
  *   classified `'alias'`; both are reclassified `'missing-projection'`, which
  *   is what their actual, measured failure is — proj4's own raw string for
  *   each names a missing projection, not an unregistered alias.
- * - `EPSG:2992`, `GOOGLE`, and a WKT string are unchanged, still `'alias'`:
- *   none of them start with `+`, so `parseTerms`'s split finds no `proj` term
- *   in any of them (for the WKT case, measured on this module's own pinned
- *   fixture, whose title happens to itself contain a literal `+` — the parse
- *   turns it into noise no key here matches, so it does not confuse the
- *   check).
+ * - `EPSG:2992` and `GOOGLE` are unchanged, still `'alias'`: neither starts
+ *   with `+`, so `parseTerms`'s split finds no `proj` term in either.
  * - a bare `+nadgrids` with no `=` used to escape as `TypeError:
  *   nadgrids.split is not a function`. `parseTerms` gives it the value `true`,
  *   the same value proj4's own parser gives it, and `true !== '@null'` is
@@ -274,21 +282,17 @@ function parseTerms(definition: string): Map<string, string | true> {
  *   string — a loud escape, not a silent one, and closing it needs
  *   `parseCode.js`'s own first-character gate ahead of `parseTerms`, which
  *   this function does not have.
- * - a WKT string reaching this function is classified `'alias'`, and that
- *   message is false of it: a WKT is self-contained (no realm-global state
- *   involved) and, measured on this module's own pinned fixture, proj4
- *   builds and projects its `PROJCS` subtree correctly. `parseTerms` never
- *   finds a `proj` term in it (it does not start with `+`), so it falls into
- *   the same bucket as a genuine alias. Fixing this needs a fourth `reason`
- *   and a way to recognise WKT (`parseCode.js`'s own `testWKT` checks for `[`
- *   with no leading `+`), which is more than this task's guard should grow to
- *   cover — Decision 6's own split (`resolveCrsDefinition` on the main
- *   thread, `createTransformFromDefinition` realm-free) means WKT should
- *   never actually reach here in this library's own flow; only a caller
- *   invoking `createTransformFromDefinition` directly with WKT, bypassing
- *   `resolveCrsDefinition`, would see this.
+ *
+ * A WKT never reaches `parseTerms`: it is recognised the way proj4's own
+ * `parseCode.js` does (`testWKT`: no leading `+`, and a `[`) and checked by
+ * `rejectUnusableWkt` below instead.
  */
 function rejectUnusableDefinition(definition: string): void {
+  if (!definition.startsWith('+') && definition.includes('[')) {
+    rejectUnusableWkt(definition);
+    return;
+  }
+
   const terms = parseTerms(definition);
 
   const nadgrids = terms.get('nadgrids');
@@ -301,5 +305,30 @@ function rejectUnusableDefinition(definition: string): void {
       definition,
       definition.startsWith('+') ? 'missing-projection' : 'alias',
     );
+  }
+}
+
+/**
+ * The WKT half of `rejectUnusableDefinition`. A WKT carries its own
+ * parameters, so the alias and missing-projection cases cannot arise; what
+ * can is a WKT proj4 cannot read, and a grid-shift table named through an
+ * `EXTENSION["PROJ4", "... +nadgrids=..."]` node, which proj4 honours.
+ *
+ * Read off the parsed projection rather than the text, because proj4 only
+ * looks at the extension's own proj4 string — measured on proj4 2.21, a
+ * `GEOGCS` extended with `+nadgrids=@conus,@alaska` parses with exactly that
+ * `nadgrids`. Left unguarded, an unreadable WKT throws proj4's own bare string
+ * or `TypeError`, which `fromUrl` would hand a `crs` caller untyped.
+ */
+function rejectUnusableWkt(definition: string): void {
+  let nadgrids: unknown;
+  try {
+    // Absent from proj4's published `Projection` type, like `to_meter` above.
+    nadgrids = (new proj4.Proj(definition) as unknown as { nadgrids?: unknown }).nadgrids;
+  } catch {
+    throw new CrsDefinitionUnusableError(definition, 'unreadable');
+  }
+  if (nadgrids !== undefined && nadgrids !== '@null') {
+    throw new CrsDefinitionUnusableError(definition, 'grid-shift');
   }
 }

@@ -7,7 +7,7 @@ import type { CodecContext } from '../src/cesium-runtime/codec.js';
 import { ScheduledRangeResource } from '../src/cesium-runtime/resource.js';
 import type { InterceptContext } from '../src/cesium-runtime/resource.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 import type { CrsTransform } from '../src/crs/index.js';
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import { UnknownTileRequestError } from '../src/errors/index.js';
@@ -24,18 +24,11 @@ import { createNodeWorkerPort } from './worker-port-node.js';
 
 const TOKEN_BASE = 'copc://a1b2c3/';
 
-// Same proj4 definition tests/worker-pnts.test.ts and tests/worker-entry.test.ts
-// register for EPSG:2992 — Autzen's own horizontal system, in international feet.
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
-
 const autzenCube = () =>
   Info.parse(fixture('autzen-head.bin').subarray(429, 429 + 160)).cube;
 
 /** Autzen's real WKT resolved to a usable proj4 definition, and the transform built from it. */
 async function crsSetup(): Promise<{ definition: string; transform: CrsTransform }> {
-  registerCrs(2992, OREGON);
   const definition = resolveCrsDefinition(await autzenWkt());
   return { definition, transform: createTransformFromDefinition(definition) };
 }

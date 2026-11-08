@@ -3,9 +3,9 @@ import { CopcTilesetError } from './base.js';
 /**
  * No horizontal EPSG code could be read from the file's WKT.
  *
- * Unlike an unregistered code, there is nothing for the caller to register —
- * the file did not say which system its coordinates are in, so the file is what
- * has to change.
+ * The file did not say which system its coordinates are in, in a form this
+ * library can read. The caller can say it instead, or the file can be
+ * re-written to say it.
  */
 export class CrsCodeNotFoundError extends CopcTilesetError {
   readonly code = 'crs-code-not-found';
@@ -14,61 +14,81 @@ export class CrsCodeNotFoundError extends CopcTilesetError {
     super(
       'No horizontal EPSG code could be read from this file\'s coordinate system ' +
         'description. Its WKT either names no authority or names one this library does ' +
-        'not recognise, so there is nothing to look up. Re-writing the file with a ' +
-        'current PDAL — `pdal translate input.laz output.copc.laz --writers.copc.a_srs=EPSG:<code>` ' +
-        '— will record a system that can be read.',
+        'not recognise. If you know the system, pass its definition when opening the file:\n\n' +
+        "    COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });\n\n" +
+        'Or re-write the file with a current PDAL — ' +
+        '`pdal translate input.laz output.copc.laz --writers.copc.a_srs=EPSG:<code>` ' +
+        '— so it records a system that can be read.',
     );
   }
 }
 
 /**
- * The file names a coordinate system nobody registered.
+ * The file names its coordinate system, but this library cannot place it on
+ * WGS84 from the file alone, so the caller has to supply the definition
+ * (Decision 6).
  *
- * Decision 6 registers only EPSG:4326 by default, because there is no
- * predicting which systems arrive and a partial built-in table would be worse
- * than one clear rule. The message therefore has to do the work: it carries the
- * code the file asked for, already inside the call that fixes it.
+ * `'datum-shift-unknown'`: the system's datum is not one EPSG publishes a
+ * zero shift to WGS84 for (`crs/null-shift-datums.ts`). proj4 would apply no
+ * shift and every point would land tens to hundreds of metres off with
+ * nothing thrown, so the file is refused instead. `'wkt-unreadable'`: proj4
+ * could not parse the file's own description of the system.
+ *
+ * The message carries the code the file names and the call that fixes it.
  */
-export class CrsNotRegisteredError extends CopcTilesetError {
-  readonly code = 'crs-not-registered';
+export class CrsDefinitionRequiredError extends CopcTilesetError {
+  readonly code = 'crs-definition-required';
   readonly epsgCode: number;
+  readonly reason: 'datum-shift-unknown' | 'wkt-unreadable';
 
-  constructor(epsgCode: number) {
+  constructor(epsgCode: number, reason: 'datum-shift-unknown' | 'wkt-unreadable') {
+    const why =
+      reason === 'datum-shift-unknown'
+        ? `This file uses EPSG:${epsgCode}, whose datum needs a shift to reach WGS84 that ` +
+          'the file does not state. Without one, every point would land tens to hundreds ' +
+          'of metres off with no error, so the file is refused. Pass a definition that ' +
+          'states the shift (for proj4, a `+towgs84=` term) when opening the file:'
+        : `This file uses EPSG:${epsgCode}, but its own description of that system could ` +
+          'not be read. Pass a definition when opening the file:';
     super(
-      `This file uses EPSG:${epsgCode}, which is not registered. Only EPSG:4326 is ` +
-        'known by default, so every other system has to be supplied once, before the ' +
-        'file is opened:\n\n' +
-        `    registerCrs(${epsgCode}, '<proj4 definition>');\n\n` +
+      `${why}\n\n` +
+        "    COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });\n\n" +
         `The definition for EPSG:${epsgCode} is at https://epsg.io/${epsgCode} — take ` +
         'its proj4 string. Its accuracy is yours to vouch for; this library only ' +
         'applies what it is given.',
     );
     this.epsgCode = epsgCode;
+    this.reason = reason;
   }
 }
 
 /**
- * A registered proj4 definition depends on state that only exists in the
- * realm that registered it, and that a Worker never receives (OVERVIEW §3,
- * Decision 3): `resolveCrsDefinition` hands a Worker the definition string
- * alone, not the process it ran in.
+ * A coordinate system definition depends on proj4 state that only exists in
+ * the realm that set it up, and that a Worker never receives (OVERVIEW §3,
+ * Decision 3): a Worker is handed the definition string alone, not the
+ * process it was resolved in.
  *
  * Three shapes of that: `'grid-shift'` for a `+nadgrids` grid-shift table (any
  * value but the self-contained `@null` sentinel), which is loaded into a
  * process-global table by `proj4.nadgrid` and is not part of the definition
  * string; `'alias'` for a `proj4.defs` key (`EPSG:2992`, a name nobody but
- * this realm ever registered) rather than a `+`-parameter string at all;
+ * this realm ever defined) rather than a `+`-parameter string or WKT;
  * `'missing-projection'` for a `+`-parameter string that never names a
  * projection (`+lat_0=41.75 +datum=NAD83`) — this one is not an alias and has
  * nothing to do with proj4's built-in table, so it gets its own reason rather
- * than sharing `'alias'`'s message.
+ * than sharing `'alias'`'s message. And `'unreadable'` for a WKT proj4 cannot
+ * parse at all — not a realm problem, but refused at the same chokepoint so
+ * a caller's `crs` fails typed rather than with proj4's bare string.
  */
 export class CrsDefinitionUnusableError extends CopcTilesetError {
   readonly code = 'crs-definition-unusable';
   readonly definition: string;
-  readonly reason: 'grid-shift' | 'alias' | 'missing-projection';
+  readonly reason: 'grid-shift' | 'alias' | 'missing-projection' | 'unreadable';
 
-  constructor(definition: string, reason: 'grid-shift' | 'alias' | 'missing-projection') {
+  constructor(
+    definition: string,
+    reason: 'grid-shift' | 'alias' | 'missing-projection' | 'unreadable',
+  ) {
     super(formatMessage(definition, reason));
     this.definition = definition;
     this.reason = reason;
@@ -76,15 +96,15 @@ export class CrsDefinitionUnusableError extends CopcTilesetError {
 }
 
 /**
- * The alias case's fix is a `registerCrs` call, same as `CrsNotRegisteredError`
- * — but only when the definition is itself an `EPSG:<code>` string, since
- * that is the one shape this error sees that already names the code to put in
- * it. A bare alias like `GOOGLE` has no code to extract, so it gets the prose
- * form instead.
+ * The alias case's fix is the full definition, passed as `crs` — and when the
+ * definition is itself an `EPSG:<code>` string, the message can say where to
+ * find it, since that is the one shape this error sees that already names the
+ * code. A bare alias like `GOOGLE` has no code to extract, so it gets the
+ * prose form instead.
  */
 function formatMessage(
   definition: string,
-  reason: 'grid-shift' | 'alias' | 'missing-projection',
+  reason: 'grid-shift' | 'alias' | 'missing-projection' | 'unreadable',
 ): string {
   if (reason === 'grid-shift') {
     return (
@@ -95,6 +115,14 @@ function formatMessage(
       'that grid file has already been loaded with `proj4.nadgrid`, which a Worker ' +
       'never has done. Replace the definition with an equivalent one that carries ' +
       'no such `+nadgrids` term.'
+    );
+  }
+
+  if (reason === 'unreadable') {
+    return (
+      `proj4 could not read this coordinate system definition:\n\n    ${definition}\n\n` +
+      'Pass a proj4 parameter string (`+proj=...`) as `crs` instead — for an EPSG ' +
+      'code, https://epsg.io/<code> lists one.'
     );
   }
 
@@ -111,11 +139,11 @@ function formatMessage(
 
   const epsgMatch = /^EPSG:(\d+)$/i.exec(definition.trim());
   const expand = epsgMatch
-    ? `Expand it into its full parameter string and register that instead:\n\n` +
-      `    registerCrs(${epsgMatch[1]}, '<proj4 definition>');\n\n` +
+    ? `Expand it into its full parameter string and pass that instead:\n\n` +
+      `    COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });\n\n` +
       `https://epsg.io/${epsgMatch[1]} lists one.`
     : 'Expand it into its full `+proj=...` parameter string — for an EPSG code, ' +
-      'https://epsg.io/<code> lists one — and register that instead.';
+      'https://epsg.io/<code> lists one — and pass that as `crs` instead.';
 
   return (
     `This coordinate system definition is a name rather than a self-contained ` +

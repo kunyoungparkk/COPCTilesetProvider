@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileHeader } from '../src/copc/header.js';
 import { readHierarchyPage } from '../src/copc/hierarchy.js';
-import { registerCrs, resolveCrsDefinition } from '../src/crs/index.js';
+import { resolveCrsDefinition } from '../src/crs/index.js';
 // The Worker's entry point, imported here the way the Worker will import it —
-// createTransformFromDefinition is realm-free but reaches no registry
+// createTransformFromDefinition is realm-free but reaches no resolver
 // (tests/crs-worker-boundary.test.ts enforces that for this barrel).
 import { createTransformFromDefinition } from '../src/crs/worker.js';
 import type { CrsTransform } from '../src/crs/worker.js';
@@ -12,12 +12,6 @@ import { toRelativePositions } from '../src/worker/positions.js';
 import { autzenWkt } from './autzen-wkt.js';
 import { bufferReader } from './fake-reader.js';
 import { fixtureBytes as fixture } from './fixtures.js';
-
-// Same proj4 definition tests/crs-transform.test.ts registers for EPSG:2992 —
-// Autzen's own horizontal system, in international feet.
-const OREGON =
-  '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
-  '+x_0=399999.9999984 +y_0=0 +datum=NAD83 +units=ft +no_defs';
 
 // Half a float32's relative spacing (the gap between 1 and the next
 // representable float32 is 2**-23) — the bound on a single round-to-nearest
@@ -69,7 +63,6 @@ describe('toRelativePositions', () => {
     const view = await decodeChunk(fixture('autzen-node-5-16-3-1.bin'), header, entry.pointCount);
     pointCount = view.pointCount;
 
-    registerCrs(2992, OREGON);
     const realTransform = createTransformFromDefinition(resolveCrsDefinition(await autzenWkt()));
 
     // A counting wrapper around toEcef: `toRelativePositions`'s doc comment
