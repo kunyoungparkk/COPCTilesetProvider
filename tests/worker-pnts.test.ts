@@ -321,8 +321,8 @@ describe('encodePnts', () => {
       // colour precision is 8 bits already sitting in the high byte of a
       // 16-bit field, not a genuine 16-bit sample — so `>>> 8` recovers it
       // exactly, with no rounding, and without collapsing this fixture's
-      // 45-70 Red range to black or white. (What this measurement does and
-      // does not settle for other files is in encodePnts's own doc comment.)
+      // 45-70 Red range to black or white. (A file that holds 8-bit values
+      // unscaled takes the other branch, pinned in its own describe below.)
       const colors: Uint8Array = parsed.colors.typedArray;
       expect(parsed.colors.componentDatatype).toBe(ComponentDatatype.UNSIGNED_BYTE);
       for (let i = 0; i < pointCount; i++) {
@@ -642,6 +642,68 @@ describe('encodePnts on a view with no colour (LAS point format 6)', () => {
       expect(parsed.batchTableBinaryStart % 8).toBe(0);
       expect(parsed.byteLength % 8).toBe(0);
     }
+  });
+});
+
+describe('encodePnts on colour a writer stored in 8 bits', () => {
+  /** A view whose points carry exactly these `[Red, Green, Blue]` field values. */
+  function viewWithColours(colours: readonly (readonly [number, number, number])[]): View {
+    const view = syntheticView(colours.length);
+    return {
+      ...view,
+      getter: (name: string) => {
+        const channel = COLOUR_DIMENSIONS.indexOf(name);
+        return channel === -1
+          ? view.getter(name)
+          : (index: number) => colours[index]?.[channel] ?? Number.NaN;
+      },
+    };
+  }
+
+  /** The RGB section's bytes, read by hand off the feature table. */
+  function rgbBytesOf(colours: readonly (readonly [number, number, number])[]): number[] {
+    const buffer = encodePnts(viewWithColours(colours), {
+      rtcCenter: [1, 2, 3],
+      positions: new Float32Array(colours.length * 3),
+    });
+    const header = readPntsHeader(buffer);
+    const offset = header.featureTableJson.RGB?.byteOffset;
+    if (offset === undefined) throw new Error('the tile carries no RGB section');
+    return [
+      ...new Uint8Array(buffer, header.featureTableBinaryStart + offset, colours.length * 3),
+    ];
+  }
+
+  // Measured on the public hobu-lidar bucket: redrocks and the las2copc
+  // autzen files top out at 254 or 255 in every chunk, and taking the high
+  // byte of those renders every point black.
+  it('keeps values that never exceed 255 as they are', () => {
+    expect(
+      rgbBytesOf([
+        [255, 128, 0],
+        [10, 200, 30],
+      ]),
+    ).toEqual([255, 128, 0, 10, 200, 30]);
+  });
+
+  // One value past 255 says the fields are used at 16 bits, for the chunk
+  // and not just for that point: the dark point beside it scales with it.
+  it('takes the high byte of every value once one exceeds 255', () => {
+    expect(
+      rgbBytesOf([
+        [256, 0, 0],
+        [255, 255, 255],
+      ]),
+    ).toEqual([1, 0, 0, 0, 0, 0]);
+  });
+
+  it('looks at all three channels to decide', () => {
+    expect(
+      rgbBytesOf([
+        [0, 0, 256],
+        [255, 255, 0],
+      ]),
+    ).toEqual([0, 0, 1, 0, 0, 0]);
   });
 });
 

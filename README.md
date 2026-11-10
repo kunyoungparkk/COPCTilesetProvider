@@ -119,9 +119,10 @@ Each point carries these batch-table properties:
 | `ReturnNumber` | uint8 | LAS return number |
 | `NumberOfReturns` | uint8 | LAS number of returns |
 
-Unstyled, points take the file's own colour. LAS point format 6 carries none,
-so such a file renders in Cesium's constant dark grey until a style gives it a
-colour — every property above is still there to style on.
+Unstyled, points take the file's own colour, whether its writer scaled it to
+LAS's 16 bits or left 8-bit values in those fields. LAS point format 6 carries
+none, so such a file renders in Cesium's constant dark grey until a style
+gives it a colour — every property above is still there to style on.
 
 Picking resolves to a tile, not a single point: `scene.pick` cannot read one
 point's properties.
