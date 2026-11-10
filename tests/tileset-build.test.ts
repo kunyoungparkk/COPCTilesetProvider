@@ -42,7 +42,6 @@ describe('buildTileset', () => {
     const { json } = buildTileset(page, await contextFor(await transformFor()));
 
     expect(json.asset).toEqual({ version: '1.0' });
-    expect(json.geometricError).toBeCloseTo(88.709_699_234, 9);
     // Decision 6: COPC nodes are a non-overlapping sample, so a volume's full
     // resolution is the union along the path from the root. Set on the root
     // only; 3D Tiles 1.0 inherits it downward.
@@ -50,6 +49,22 @@ describe('buildTileset', () => {
     expect(json.root.children?.[0]?.refine).toBeUndefined();
     expect(json.root.geometricError).toBeCloseTo(88.709_699_234, 9);
     expect(json.root.children?.[0]?.geometricError).toBeCloseTo(44.354_849_617, 9);
+  });
+
+  // Cesium draws nothing of a tileset whose own error, on screen, is within
+  // maximumScreenSpaceError: the traversal returns before it visits the root.
+  // Given the root tile's error (span / 16) the whole file disappeared while
+  // it was still up to 16 x 16 = 256 pixels across. The tileset's own error is
+  // what drawing none of it loses, the measured span itself: 16 x 88.7097 m.
+  it('gives the tileset the whole measured span as its own geometric error', async () => {
+    const page = await hierarchyPageOf([
+      { key: [0, 0, 0, 0], offset: 100, byteSize: 10, pointCount: 5 },
+    ]);
+
+    const { json } = buildTileset(page, await contextFor(await transformFor()));
+
+    expect(json.geometricError).toBeCloseTo(1419.355_187_747, 8);
+    expect(json.root.geometricError).toBeCloseTo(88.709_699_234, 9);
   });
 
   it('names each tile with the caller’s prefix and the octree key', async () => {

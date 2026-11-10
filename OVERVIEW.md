@@ -109,6 +109,15 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
   (체크포인트: 언로드·캐시 거동이 이상하면 이 선택과의 상호작용이 첫 용의자)
 - **geometricError = 루트의 실측 미터 span / N, 깊이마다 절반.** span은
   수평·수직 중 큰 쪽 — 수직으로 긴 데이터에서 세분이 멎지 않게. (N 초기값은 §7)
+  문서 최상위 `geometricError`는 루트 타일의 값이 아니라 span 그 자체다. Cesium은
+  최상위 값의 화면 오차가 `maximumScreenSpaceError` 이하이면 루트를 방문하지 않고
+  순회를 끝낸다(`Cesium3DTilesetBaseTraversal.js`). 길이의 화면 오차는 그 길이의 화면
+  크기(px)이므로, span을 쓰면 파일은 화면에서 MSSE보다 작아질 때만 빠진다 — "아무것도
+  그리지 않았을 때의 오차는 데이터 전체 크기"라는 3D Tiles의 정의 그대로이고, 새
+  노브가 생기지 않는다. 루트 타일 값(span/N)을 쓰면 N배 일찍, 기본값에서는 파일이
+  아직 256px일 때 통째로 사라진다. 실측(2026-11-10, headless Chromium 1280×720,
+  Cesium 1.147.0, 폭 1.4 km인 Autzen, SSE 16): 루트 타일 값일 때 카메라 거리 9 km에서
+  0타일, span일 때 9~90 km에서 루트 1타일(61,201점)이 남고 120 km에서 0타일.
 - **좌표 = 타일별 RTC_CENTER + float32 상대좌표.** ECEF 절대좌표(~6.4×10⁶ m)는
   float32 정밀도가 ~0.5m라 카메라 이동 시 지터가 생긴다. 타일 기준점(RTC_CENTER)
   상대값으로 저장하면 float32로도 mm 이하 정밀도 — 충분하다.
