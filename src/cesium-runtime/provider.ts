@@ -4,7 +4,7 @@ import type { Budget, BudgetStats } from '../budget/index.js';
 import { createBudget } from '../budget/index.js';
 import type { CopcFile } from '../copc/index.js';
 import { openCopc } from '../copc/index.js';
-import { findVerticalEpsgCode, resolveCrsDefinition } from '../crs/index.js';
+import { findVerticalEpsgCode, findVerticalUnit, resolveCrsDefinition } from '../crs/index.js';
 import type { CrsTransform } from '../crs/index.js';
 import { createTransformFromDefinition } from '../crs/worker.js';
 import {
@@ -100,6 +100,9 @@ export interface COPCTilesetProviderOptions {
    * (`WktNotInVlrsError`). For a datum shift, the definition has to state
    * it — in proj4, a `+towgs84=` term. Its accuracy is the caller's to vouch
    * for; this library applies what it is given.
+   *
+   * Heights keep the unit the file's vertical system states. They take this
+   * definition's linear unit only when the file states none.
    */
   readonly crs?: string;
   /**
@@ -392,7 +395,15 @@ export class COPCTilesetProvider {
     // A caller's `crs` replaces the file's own description outright, so a file
     // whose WKT would be refused, or that has none, still opens with it.
     const definition = options.crs ?? resolveFileCrs(file.wkt, url);
-    const transform = createTransformFromDefinition(definition, options.geoidHeight);
+    // Read from the file whether or not `crs` was passed: the option replaces
+    // the horizontal system, and what the file says about its heights stands.
+    const metresPerVerticalUnit =
+      file.wkt === undefined ? undefined : (findVerticalUnit(file.wkt) ?? undefined);
+    const transform = createTransformFromDefinition(
+      definition,
+      options.geoidHeight,
+      metresPerVerticalUnit,
+    );
 
     warnIfHeightsAreUncorrected(file.wkt, options.geoidHeight, file.header, transform);
 
@@ -479,6 +490,7 @@ export class COPCTilesetProvider {
       // Conditional spread for the same `exactOptionalPropertyTypes` reason as
       // the `fetch` one above.
       ...(options.geoidHeight !== undefined && { geoidHeight: options.geoidHeight }),
+      ...(metresPerVerticalUnit !== undefined && { metresPerVerticalUnit }),
       budget,
       size: workerPoolSize,
     });

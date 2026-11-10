@@ -274,8 +274,12 @@ describe('COPCTilesetProvider.fromUrl', () => {
 
     // The root's own geometric error, from the file's measured span — a
     // construction mistake (a stray unit conversion, an unapplied divisor)
-    // is invisible to an `instanceof` check but not to this number.
-    expect(provider.tileset.root.geometricError).toBeCloseTo(ROOT_GEOMETRIC_ERROR, 9);
+    // is invisible to an `instanceof` check but not to this number. It is
+    // `ROOT_GEOMETRIC_ERROR` but for its ninth decimal: that constant is
+    // measured with heights in the horizontal system's international feet,
+    // and this file's vertical system says US survey feet, two parts per
+    // million longer, which lifts the corner the span is measured from.
+    expect(provider.tileset.root.geometricError).toBeCloseTo(88.709_699_237_650_9, 9);
 
     const resource = contentResourceOf(provider.tileset.root) as ScheduledRangeResource;
     const bytes = await resource.fetchArrayBuffer();
@@ -692,6 +696,53 @@ describe('fromUrl and the caller signal', () => {
       fetch: autzenFetch().fetch,
     });
     provider.destroy();
+  });
+});
+
+describe('vertical unit', () => {
+  // Both spies call through, as in the geoidHeight block below.
+  const unitsHandedOn = async (options: { fetch: typeof globalThis.fetch; crs?: string }) => {
+    const createPool = vi.spyOn(poolModule, 'createWorkerPool');
+    const createTransform = vi.spyOn(crsWorkerModule, 'createTransformFromDefinition');
+    try {
+      await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, ...options });
+      return {
+        worker: createPool.mock.calls[0]?.[0]?.metresPerVerticalUnit,
+        mainThread: createTransform.mock.calls[0]?.[2],
+      };
+    } finally {
+      createPool.mockRestore();
+      createTransform.mockRestore();
+    }
+  };
+
+  // Autzen: international feet across, US survey feet up. One realm scaling
+  // heights by the other's unit would put points outside their own tiles'
+  // bounding volumes.
+  it('hands the unit of the file\'s vertical system to both realms', async () => {
+    expect(await unitsHandedOn({ fetch: autzenFetch().fetch })).toEqual({
+      worker: 0.304800609601219,
+      mainThread: 0.304800609601219,
+    });
+  });
+
+  // `crs` replaces the horizontal system. What the file says about its
+  // heights still stands.
+  it('keeps the file\'s vertical unit when crs is passed', async () => {
+    expect(await unitsHandedOn({ fetch: autzenFetch().fetch, crs: OREGON })).toEqual({
+      worker: 0.304800609601219,
+      mainThread: 0.304800609601219,
+    });
+  });
+
+  it('hands on none when the file declares no vertical system', async () => {
+    // Autzen's own horizontal system, without the compound around it.
+    const wkt = resolveCrsDefinition(await autzenWkt());
+
+    expect(await unitsHandedOn({ fetch: autzenFetchWithWkt(wkt).fetch })).toEqual({
+      worker: undefined,
+      mainThread: undefined,
+    });
   });
 });
 

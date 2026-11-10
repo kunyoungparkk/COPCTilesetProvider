@@ -216,6 +216,29 @@ describe('createWorkerPool', () => {
     expect(init.geoidHeight).toBe(-23.333);
   });
 
+  // The same hop as the geoid height above, for the other number a transform
+  // takes: dropped here, the Worker scales heights by the definition's unit
+  // while the main thread's bounding volumes use the file's.
+  it('carries the vertical unit on the init it posts', () => {
+    const { spawn, ports } = fakeSpawner();
+    const budget = createBudget({ decodeJobs: 4 });
+    const pool = createWorkerPool({
+      spawn,
+      definition: DEFINITION,
+      metresPerVerticalUnit: 0.3048006096012192,
+      budget,
+      size: 1,
+    });
+
+    pool.encode(request());
+
+    const port = ports[0];
+    if (port === undefined) throw new Error('expected a port to have been spawned');
+    const init = port.posted[0];
+    if (init === undefined || init.kind !== 'init') throw new Error('expected an init message');
+    expect(init.metresPerVerticalUnit).toBe(0.3048006096012192);
+  });
+
   it('ignores a ready reply whose id does not match that port’s own init', () => {
     const { spawn, ports } = fakeSpawner();
     const budget = createBudget({ decodeJobs: 4 });

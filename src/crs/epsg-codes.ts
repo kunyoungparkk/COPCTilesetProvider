@@ -67,9 +67,27 @@ export function findVerticalEpsgCode(wkt: string): number | null {
 }
 
 /**
+ * Metres per unit of the file's heights, as its vertical system states it.
+ *
+ * The horizontal definition cannot answer this: its linear unit is the unit
+ * of x and y, and a file is free to measure height in another. Measured on
+ * the public hobu-lidar bucket, autzen-2023 is in metres across and US survey
+ * feet up, so heights scaled by the horizontal unit come out 3.28 times too
+ * tall.
+ *
+ * Returns `null` when the file names no vertical system, or names one whose
+ * `UNIT` is missing or is not a positive number. The caller reads that as
+ * "the file did not say", and falls back to the horizontal definition's unit.
+ */
+export function findVerticalUnit(wkt: string): number | null {
+  return scanAuthorities(wkt).verticalUnit;
+}
+
+/**
  * Every EPSG code the WKT carries, keyed by the keyword its AUTHORITY node
  * sits directly inside — `PROJCS`, `GEOGCS`, `DATUM`, `VERT_CS`, and whatever
- * else the file names — and the text of its horizontal system's nodes.
+ * else the file names — the text of its horizontal system's nodes, and the
+ * linear unit of its vertical system.
  *
  * Keyed by parent rather than collected in order because a code's meaning is
  * its position: Autzen's WKT holds ten AUTHORITY nodes, and 2992, 4269, 6360
@@ -80,6 +98,7 @@ function scanAuthorities(wkt: string): {
   found: Map<string, number>;
   spans: Map<string, string>;
   sawProjected: boolean;
+  verticalUnit: number | null;
 } {
   // Keyed by the keyword each authority sits directly inside, so the horizontal
   // system's own code is distinguishable from the ones its parts carry.
@@ -94,6 +113,7 @@ function scanAuthorities(wkt: string): {
   // and "that system names an EPSG code" are different facts with different
   // answers — see how findHorizontalCrs resolves the two.
   let sawProjected = false;
+  let verticalUnit: number | null = null;
 
   for (let i = 0; i < wkt.length; i++) {
     const character = wkt[i];
@@ -126,6 +146,14 @@ function scanAuthorities(wkt: string): {
     if ((node.keyword === 'PROJCS' || node.keyword === 'GEOGCS') && !spans.has(node.keyword)) {
       spans.set(node.keyword, wkt.slice(node.start, i + 1));
     }
+
+    // Direct child only, for the reason an authority is: a compound WKT holds
+    // a UNIT under its projected system, another under the geographic one
+    // inside that, and each means a different thing.
+    const parent = open[open.length - 1];
+    if (node.keyword === 'UNIT' && parent?.keyword === 'VERT_CS') {
+      verticalUnit = unitFactor(wkt.slice(node.body, i));
+    }
     if (node.keyword !== 'AUTHORITY') {
       continue;
     }
@@ -136,7 +164,6 @@ function scanAuthorities(wkt: string): {
     // PROJCS, GEOGCS, and VERT_CS are ever read back. Later wins where it does
     // show, and that is pinned, so the tie-break is a choice and not this
     // loop's shape.
-    const parent = open[open.length - 1];
     if (parent === undefined) {
       continue;
     }
@@ -147,7 +174,7 @@ function scanAuthorities(wkt: string): {
     }
   }
 
-  return { found, spans, sawProjected };
+  return { found, spans, sawProjected, verticalUnit };
 }
 
 /**
@@ -169,6 +196,17 @@ function keywordStart(wkt: string, bracket: number): number {
     start--;
   }
   return start;
+}
+
+const UNIT_BODY = /^\s*"[^"]*"\s*,\s*([^,\s]+)/;
+
+/**
+ * Reads the conversion factor out of a unit node's body, `"foot",0.3048` and
+ * whatever follows it, or `null` if it is not a positive number.
+ */
+function unitFactor(body: string): number | null {
+  const factor = Number(UNIT_BODY.exec(body)?.[1]);
+  return Number.isFinite(factor) && factor > 0 ? factor : null;
 }
 
 const EPSG_BODY = /^\s*"?EPSG"?\s*,\s*"?(\d+)"?\s*$/;

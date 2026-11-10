@@ -80,7 +80,8 @@ export type { BudgetCounterStats, BudgetStats } from './budget/index.js';
  * `spawnWorker` instead, and `browserPort` is the adapter they would otherwise
  * write by hand.
  *
- * A hand-written handler must forward the `init` message's `geoidHeight` to
- * `createTransformFromDefinition` — see `ToWorker`'s own doc comment.
+ * A hand-written handler must forward the `init` message's `geoidHeight` and
+ * `metresPerVerticalUnit` to `createTransformFromDefinition` — see `ToWorker`'s
+ * own doc comment.
  */
 export type { FromWorker, ToWorker } from './worker/protocol.js';

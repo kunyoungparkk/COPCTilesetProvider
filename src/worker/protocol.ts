@@ -26,6 +26,15 @@ export type ToWorker =
        * already corrected.
        */
       readonly geoidHeight?: number;
+      /**
+       * Metres per unit of the file's heights, where its vertical system
+       * states one (Decision 6). Optional on the wire for the same reason as
+       * `geoidHeight`: absent, `createTransformFromDefinition` falls back to
+       * the definition's own linear unit. A hand-written handler must forward
+       * this too, or its points are scaled by one unit and the main thread's
+       * bounding volumes by another.
+       */
+      readonly metresPerVerticalUnit?: number;
     }
   | {
       readonly kind: 'encode';
