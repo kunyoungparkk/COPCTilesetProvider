@@ -129,27 +129,34 @@ function padTrailing(json: string, precedingBytes: number): string {
  * no colour is invented here, because a value this library made up would be
  * indistinguishable, to a caller, from one the file supplied.
  *
- * LAS colour is 16-bit (`Red`/`Green`/`Blue`), PNTS `RGB` is 8-bit per
- * channel, so some conversion has to happen; `>>> 8` is what this module
- * does, for every file that has colour at all. What settles that choice for
- * *this* file: measured on `fixtures/autzen-node-5-16-3-1.bin` (47 points,
- * all three channels, every point), every value is an exact multiple of 256
- * and none is a multiple of 257 — this file's real colour precision is 8
- * bits, left-shifted into the high byte of a 16-bit field, not a genuine
- * 16-bit sample, so `>>> 8` recovers those 8 bits exactly (no rounding: the
- * low byte is always zero) and neither blacks out this fixture's low end
- * (min Red 11520 -> 45) nor blows out its high end (max Red 17920 -> 70).
- * What that measurement does *not* settle: a writer that stores genuine
- * 8-bit colour unscaled in the low byte of these 16-bit fields (rather than
- * left-shifted into the high byte) would go uniformly, silently black under
- * `>>> 8` — this module does not detect or correct for that, and does not
- * attempt a per-tile heuristic to guess it, because a per-tile guess is
- * worse than a wrong constant: neighbouring tiles could each guess
- * differently and scale their colour inconsistently, producing a visible
- * seam between tiles that a single wrong-but-uniform rule would not. A
- * whole-file decision (inspecting the header or a wider sample once, at
- * `fromUrl` time) is where that question belongs, not here, one chunk at a
- * time.
+ * LAS colour fields are 16 bits wide and PNTS `RGB` is 8 bits per channel.
+ * Writers fill the fields two ways and no file says which: scaled to the full
+ * 16 bits, as the LAS specification asks, or holding 8-bit values as they
+ * were. The second kind renders black under a plain `>>> 8`. So the chunk
+ * decides: if any of its colour values exceeds 255 the fields are in use at
+ * 16 bits and every value gives its high byte, and otherwise every value is
+ * kept as it is. `@loaders.gl/las` draws the same line under its
+ * `colorDepth: 'auto'` (4.5.4, `parse-las.ts`).
+ *
+ * Measured over every chunk of four public files (hobu-lidar, 1,956 chunks,
+ * 46.5 million points): the two that scale, autzen-classified and
+ * autzen-2023, have a value above 255 in all 1,537 of their chunks, each one
+ * a multiple of 256, so `>>> 8` loses nothing; the two that do not,
+ * autzen.large and redrocks.large, have none above 255 in any of their 419.
+ * No chunk decided differently from the rest of its file.
+ *
+ * The rule is applied per chunk, and that leaves one case open. It parts
+ * from a plain `>>> 8` only on a chunk of a 16-bit file whose every value is
+ * 255 or less: all zeros render black either way, and anything else there
+ * renders too bright where `>>> 8` would have rendered it black. That takes
+ * colour sampled at a true 16 bits — 8-bit colour scaled up holds no value
+ * from 1 to 255 — and a chunk dark throughout. One decision per file would
+ * close the case, but it has to be made from points, and `fromUrl` reads
+ * none (OVERVIEW §4).
+ *
+ * A file whose colour is all zeros is left alone and renders black. Dropping
+ * `RGB` for an all-zero chunk would turn the uncoloured gaps of a coloured
+ * file grey, tile by tile.
  */
 export function encodePnts(view: View, placed: RelativePositions): ArrayBuffer {
   const count = view.pointCount;
@@ -191,11 +198,18 @@ export function encodePnts(view: View, placed: RelativePositions): ArrayBuffer {
     const getRed = view.getter('Red');
     const getGreen = view.getter('Green');
     const getBlue = view.getter('Blue');
+    let largest = 0;
+    for (let i = 0; i < count; i++) {
+      largest = Math.max(largest, getRed(i), getGreen(i), getBlue(i));
+    }
+    // One answer for the whole chunk, never one per point: a dark point in a
+    // 16-bit chunk has to scale with its neighbours.
+    const shift = largest > 255 ? 8 : 0;
     rgb = new Uint8Array(count * 3);
     for (let i = 0; i < count; i++) {
-      rgb[i * 3] = getRed(i) >>> 8;
-      rgb[i * 3 + 1] = getGreen(i) >>> 8;
-      rgb[i * 3 + 2] = getBlue(i) >>> 8;
+      rgb[i * 3] = getRed(i) >>> shift;
+      rgb[i * 3 + 1] = getGreen(i) >>> shift;
+      rgb[i * 3 + 2] = getBlue(i) >>> shift;
     }
   }
   const featureTableBinary = concatBytes(rgb ? [positionBytes, rgb] : [positionBytes]);

@@ -21,6 +21,15 @@ minors could carry behaviour changes, as 0.2.0 did.
   smaller on screen than `maximumScreenSpaceError` pixels. In headless
   Chromium at 1280×720, Autzen, 1.4 km across, had no tile left at a camera
   range of 9 km; it now keeps its root tile out to 90 km.
+- Colour stored as 8-bit values no longer renders black. LAS colour fields
+  are 16 bits wide and every value gave its high byte, so a file whose writer
+  left values of 0 to 255 in them came out with every point black. A chunk
+  now gives the high byte only when one of its colour values exceeds 255, and
+  is read as it is otherwise. Over every chunk of four public files, 1,956
+  chunks in all, no chunk decided differently from the rest of its file. One
+  case is left open: colour sampled at a true 16 bits, in a chunk whose every
+  value is 255 or less, comes out too bright where it used to be black. A
+  file whose colour is all zeros still renders black.
 - A file that stores no WKT opens when `crs` is passed. `fromUrl` refused
   every such file with `WktNotInVlrsError` before it looked at `crs`: it took
   the header's count of extended VLRs as a sign that the WKT was stored
