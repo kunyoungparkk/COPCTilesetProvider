@@ -93,12 +93,6 @@ describe('resolveCrsDefinition when nothing names the system', () => {
       expect.objectContaining({ code: 'crs-code-not-found' }),
     );
   });
-
-  it('rejects a file with no WKT at all', () => {
-    expect(() => resolveCrsDefinition(undefined)).toThrow(
-      expect.objectContaining({ code: 'crs-code-not-found' }),
-    );
-  });
 });
 
 describe('NULL_SHIFT_DATUMS', () => {

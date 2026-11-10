@@ -164,7 +164,11 @@ admitted(진행)/deferred(다음 프레임 재시도)/rejected(영구 거부) 3�
   - 거절은 typed error다. 에러는 API의 일부다: 파일에서 추출한 EPSG 코드, 그 코드의
     epsg.io 주소, 복사-실행 가능한 `fromUrl(url, { crs: … })` 호출문을 포함할 것.
     datum 이동 미상·WKT 판독 불가는 `CrsDefinitionRequiredError`, 코드 추출 실패는
-    `CrsCodeNotFoundError`(파일 재작성도 함께 안내).
+    `CrsCodeNotFoundError`(파일 재작성도 함께 안내), VLR에 WKT가 아예 없으면
+    `WktNotInVlrsError`. WKT가 없다는 판정은 `crs`가 넘어오지 않았을 때만 거절이다 —
+    EVLR 개수로 "WKT가 거기 있을 것"이라 추측하지 않는다. 모든 COPC 파일은
+    hierarchy를 EVLR로 갖기 때문에 그 추측은 WKT 없는 파일 전부를 `crs`로도 못 열게
+    만든다(실측: 공개 파일 denver-airport-2018).
   - epsg.io 자동 조회는 하지 않는다. 실행 중 외부 서비스에 기대면 폐쇄망에서
     동작하지 않고, 정작 필요한 구측지계에서도 정확하지 않다(실측: epsg.io의
     EPSG:5174 proj4 문자열은 PROJ 대비 15 m — Molodensky-Badekas의 회전 중심이

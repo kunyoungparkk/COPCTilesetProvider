@@ -78,6 +78,26 @@ const autzenFetchWithWkt = (wkt: string) =>
     { offset: 81_114_146, bytes: ROOT_HIERARCHY },
   ]);
 
+/**
+ * Autzen as a file that declares no coordinate system: the header counts two
+ * VLRs and starts its point data where the WKT record began, so the region
+ * holds the info and laszip records and nothing else. This is the shape a real
+ * one has (measured: denver-airport-2018 in the public hobu-lidar bucket),
+ * down to the one extended VLR every COPC file carries, its hierarchy.
+ */
+const autzenFetchWithoutWkt = () => {
+  const head = new Uint8Array(HEAD);
+  const view = new DataView(head.buffer);
+  // LAS 1.4 header: offset to point data at byte 96, number of VLRs at 100.
+  view.setUint32(96, HEADER.headerLength + WKT_RECORD_START, true);
+  view.setUint32(100, 2, true);
+  return fixtureFetch([
+    { offset: 0, bytes: head },
+    { offset: 375, bytes: VLRS },
+    { offset: 81_114_146, bytes: ROOT_HIERARCHY },
+  ]);
+};
+
 /** Adds the root node's own chunk, so a tile fetch through the real tileset has somewhere to land. */
 const autzenFetchWithRootChunk = () =>
   fixtureFetch([
@@ -162,6 +182,27 @@ describe('COPCTilesetProvider.fromUrl', () => {
     await expect(
       COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch }),
     ).rejects.toMatchObject({ code: 'crs-code-not-found' });
+  });
+
+  // A file with no WKT is the one that needs `crs` most: nothing else can say
+  // where its points are.
+  it('opens a file that stores no WKT once crs is passed', async () => {
+    const { fetch, ranges } = autzenFetchWithoutWkt();
+
+    const provider = await COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch, crs: OREGON });
+
+    expect(provider.tileset.root.geometricError).toBeCloseTo(ROOT_GEOMETRIC_ERROR, 9);
+    // The VLR region read stops where the header says the point data starts,
+    // so the fixture really was read as a file with two VLRs.
+    expect(ranges).toEqual(['bytes=0-588', 'bytes=375-688', 'bytes=81114146-81123041']);
+  });
+
+  it('rejects a file that stores no WKT, naming it and the crs call that opens it', async () => {
+    const open = () =>
+      COPCTilesetProvider.fromUrl(FILE_URL, { spawnWorker, fetch: autzenFetchWithoutWkt().fetch });
+
+    await expect(open()).rejects.toMatchObject({ code: 'wkt-not-in-vlrs', url: FILE_URL });
+    await expect(open()).rejects.toThrow("\n    COPCTilesetProvider.fromUrl(url, { crs: '");
   });
 
   it('refuses a relative url before issuing a single request', async () => {

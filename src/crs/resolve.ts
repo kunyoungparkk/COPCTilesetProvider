@@ -27,10 +27,8 @@ import { NULL_SHIFT_DATUMS } from './null-shift-datums.js';
  * through. The measurement is in the comment above `rejectUnusableDefinition`
  * in `crs/transform.ts`.
  */
-export function resolveCrsDefinition(wkt: string | undefined): string {
-  // A file with no WKT at all fails the same way as one whose WKT names no
-  // system: either way nobody said which system these coordinates are in.
-  const horizontal = wkt === undefined ? null : findHorizontalCrs(wkt);
+export function resolveCrsDefinition(wkt: string): string {
+  const horizontal = findHorizontalCrs(wkt);
   if (horizontal === null) {
     throw new CrsCodeNotFoundError();
   }
