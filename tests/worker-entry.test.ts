@@ -290,6 +290,52 @@ describe('createWorkerHandler carries the geoid height', () => {
   });
 });
 
+describe('createWorkerHandler carries the vertical unit', () => {
+  /** Runs one init/encode pair and returns the pnts bytes it replied with. */
+  const encodeWith = async (metresPerVerticalUnit?: number): Promise<Uint8Array> => {
+    const { header, pointCount, definition } = await loadNode();
+    const { sent, post } = collector();
+    const handler = createWorkerHandler(post);
+
+    await handler({
+      kind: 'init',
+      id: 1,
+      definition,
+      ...(metresPerVerticalUnit !== undefined && { metresPerVerticalUnit }),
+    });
+    await handler({
+      kind: 'encode',
+      id: 2,
+      compressed: fixture('autzen-node-5-16-3-1.bin').buffer as ArrayBuffer,
+      header,
+      pointCount,
+    });
+
+    const reply = sent[1];
+    if (reply?.kind !== 'done') {
+      throw new Error(`expected a done reply, got ${JSON.stringify(reply)}`);
+    }
+    return new Uint8Array(reply.pnts);
+  };
+
+  // Like the geoid height, the unit rides one init and has to reach every
+  // encode after it: a handler that dropped it would still answer done, with
+  // every height scaled by the wrong unit.
+  it('applies an init vertical unit to a later encode', async () => {
+    const inFeet = await encodeWith();
+    const inMetres = await encodeWith(1);
+
+    expect(inMetres.byteLength).toBe(inFeet.byteLength);
+    expect(inMetres).not.toEqual(inFeet);
+  });
+
+  // Autzen's definition is in international feet, so naming that same unit
+  // must change nothing.
+  it('encodes identically when the unit is the definition\'s own', async () => {
+    expect(await encodeWith(0.3048)).toEqual(await encodeWith());
+  });
+});
+
 describe('against a real node:worker_threads Worker', () => {
   // WASM initialisation in a fresh Worker is not instant: measured directly
   // (`node --import tests/worker-hook.mjs`, this machine, 3 runs) at

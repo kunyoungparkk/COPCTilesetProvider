@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { autzenWkt } from './autzen-wkt.js';
-import { findHorizontalCrs, findVerticalEpsgCode } from '../src/crs/epsg-codes.js';
+import {
+  findHorizontalCrs,
+  findVerticalEpsgCode,
+  findVerticalUnit,
+} from '../src/crs/epsg-codes.js';
 
 // The code alone, which is all these tests are about; the datum code and the
 // WKT that come with it are `tests/crs-resolve.test.ts`'s.
@@ -134,5 +138,41 @@ describe('findVerticalEpsgCode', () => {
       'VERT_CS["NAVD88",VERT_DATUM["d",2005,AUTHORITY["EPSG","5103"]],AUTHORITY["EPSG","6360"]]';
 
     expect(findVerticalEpsgCode(wkt)).toBe(6360);
+  });
+});
+
+describe('findVerticalUnit', () => {
+  // Autzen's heights are in US survey feet and its horizontal system is in
+  // international feet. Only the vertical system's own unit says so.
+  it('reads the unit of the vertical system in the real file', async () => {
+    expect(findVerticalUnit(await autzenWkt())).toBe(0.304800609601219);
+  });
+
+  // The shape of autzen-2023 in the public hobu-lidar bucket: metres across,
+  // US survey feet up. Reading the horizontal unit here is the whole bug.
+  it('takes the vertical unit and not the horizontal one beside it', () => {
+    const wkt =
+      'COMPD_CS["c",PROJCS["p",UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","6557"]],' +
+      'VERT_CS["v",VERT_DATUM["d",2005,AUTHORITY["EPSG","5103"]],' +
+      'UNIT["US survey foot",0.3048006096012192,AUTHORITY["EPSG","9003"]],AXIS["Up",UP]]]';
+
+    expect(findVerticalUnit(wkt)).toBe(0.3048006096012192);
+  });
+
+  // No vertical system is no statement about heights at all. The caller reads
+  // null as "use the horizontal definition's unit", so the foot here must not
+  // be mistaken for one.
+  it('returns null when there is no vertical system', () => {
+    expect(findVerticalUnit('PROJCS["p",UNIT["foot",0.3048],AUTHORITY["EPSG","2992"]]')).toBeNull();
+  });
+
+  it('returns null when the vertical system states no unit', () => {
+    expect(findVerticalUnit('VERT_CS["v",VERT_DATUM["d",2005],AXIS["Up",UP]]')).toBeNull();
+  });
+
+  // A unit of zero would flatten every height, and a negative one would turn
+  // the file upside down, with nothing thrown.
+  it.each(['0', '-0.3048', 'feet'])('returns null for a unit of %s', (factor) => {
+    expect(findVerticalUnit(`VERT_CS["v",VERT_DATUM["d",2005],UNIT["u",${factor}]]`)).toBeNull();
   });
 });

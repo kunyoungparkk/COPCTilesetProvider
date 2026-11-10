@@ -23,25 +23,23 @@ export interface CrsTransform {
    */
   toWgs84(x: number, y: number, z: number): [number, number, number];
   /**
-   * File coordinates to ECEF metres. `z` is taken to be in the same linear unit
-   * as `x` and `y`: a file measuring height in a unit its horizontal system does
-   * not use comes out vertically scaled. That is a v1 limitation of its own, and
-   * distinct from the datum offset `geoidHeight` corrects.
+   * File coordinates to ECEF metres. `z` is in the unit the transform was
+   * built with: the one the file's vertical system states, or else the
+   * definition's own linear unit. Which unit a height is counted in is a
+   * separate matter from the datum offset `geoidHeight` corrects.
    */
   toEcef(x: number, y: number, z: number): [number, number, number];
 }
 
 /**
- * Metres per unit of a definition's own linear unit.
+ * Metres per unit of a definition's own linear unit: what a height is scaled
+ * by when the file's vertical system states no unit of its own.
  *
  * proj4 converts the horizontal pair and hands z back untouched, so the height
  * has to be scaled here or a file in feet arrives claiming to be in metres —
- * 282 metres too high, for this module's own pinned file. Taking the unit from
- * the definition takes it from where the horizontal pair already took it. The
- * file's vertical system would be more exactly right and needs the WKT
- * structure walk Decision 6 does without; where the two disagree, as they
- * do on the pinned file, it is an international foot against a US survey foot —
- * two parts per million.
+ * 282 metres too high, for this module's own pinned file. With nothing said
+ * about the vertical, the definition's unit is the best statement there is:
+ * it is where the horizontal pair already took its own.
  *
  * proj4 2.21 sets `to_meter` only where the definition names a non-metre linear
  * unit — measured: 0.3048 for `+units=ft` and for a WKT `UNIT["foot",0.3048]`,
@@ -104,6 +102,11 @@ function rejectUnusableGeoidHeight(geoidHeight: number): void {
  * unit — so z is scaled into metres and, absent a `geoidHeight` correction,
  * otherwise passes through the projection untouched.
  *
+ * `metresPerVerticalUnit` is the unit the file's vertical system states for
+ * its heights (`findVerticalUnit`), which need not be the definition's: a
+ * file can be in metres across and feet up (Decision 6). Without it, heights
+ * take the definition's linear unit.
+ *
  * Refuses definitions it cannot carry across the Worker boundary before any
  * of that runs — see `rejectUnusableDefinition` below for why. Refuses a
  * non-finite `geoidHeight` the same way, before any of that runs either —
@@ -121,12 +124,13 @@ function rejectUnusableGeoidHeight(geoidHeight: number): void {
 export function createTransformFromDefinition(
   definition: string,
   geoidHeight = 0,
+  metresPerVerticalUnit?: number,
 ): CrsTransform {
   rejectUnusableDefinition(definition);
   rejectUnusableGeoidHeight(geoidHeight);
 
   const toWgs84Projection = proj4(definition, WGS84);
-  const metresPerZ = metresPerUnit(definition);
+  const metresPerZ = metresPerVerticalUnit ?? metresPerUnit(definition);
 
   // Named rather than inlined into both members: the two outputs must come
   // from one projection, or a caller could place a bounding volume by one

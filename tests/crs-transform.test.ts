@@ -12,11 +12,12 @@ const OREGON = '+proj=lcc +lat_0=41.75 +lon_0=-120.5 +lat_1=43 +lat_2=45.5 ' +
 // Autzen Stadium, Eugene, Oregon — where the file's own points actually are.
 const STADIUM = { longitude: -123.0681, latitude: 44.0582 };
 
-// EPSG:2992 is in international feet, so the file's x and y are, and the
-// transform takes its z to be the same. Every height below is therefore a foot
-// count until it is scaled. (The file's VERT_CS actually names the US survey
-// foot — two parts per million away, or 0.37 mm at this file's greatest
-// height, and it costs the WKT structure walk to read.)
+// EPSG:2992 is in international feet, so the file's x and y are, and a
+// transform built from the definition alone takes its z to be the same. Every
+// height below is therefore a foot count until it is scaled. (The file's
+// VERT_CS names the US survey foot — two parts per million away, or 0.37 mm
+// at this file's greatest height. `fromUrl` reads that and passes it as the
+// third argument, which the 'vertical unit' block below covers.)
 const FOOT = 0.3048;
 
 /**
@@ -455,6 +456,49 @@ describe('createTransformFromDefinition refuses what it cannot carry across a re
 
     expect(caught).toBeInstanceOf(CrsDefinitionUnusableError);
     expect((caught as CrsDefinitionUnusableError).reason).toBe('missing-projection');
+  });
+});
+
+describe('vertical unit', () => {
+  // A point inside Autzen, in the file's own international feet across.
+  const POINT = { x: 637290.75, y: 851209.9, z: 406.14 };
+  const US_SURVEY_FOOT = 0.3048006096012192;
+
+  // The definition says feet and the file's vertical system says metres: the
+  // height is a metre count and must not be scaled as feet.
+  it('scales a height by the vertical unit it is given, not by the definition\'s', () => {
+    const [, , height] = createTransformFromDefinition(OREGON, 0, 1).toWgs84(
+      POINT.x, POINT.y, POINT.z,
+    );
+
+    expect(height).toBeCloseTo(POINT.z, 9);
+  });
+
+  it('leaves longitude and latitude to the definition', () => {
+    const [longitude, latitude] = createTransformFromDefinition(OREGON).toWgs84(
+      POINT.x, POINT.y, POINT.z,
+    );
+
+    expect(
+      createTransformFromDefinition(OREGON, 0, US_SURVEY_FOOT).toWgs84(POINT.x, POINT.y, POINT.z),
+    ).toEqual([longitude, latitude, POINT.z * US_SURVEY_FOOT]);
+  });
+
+  // The geoid height is metres whatever the file counts in, so it lands after
+  // the vertical unit exactly as it lands after the definition's.
+  it('adds the geoid height after the vertical unit', () => {
+    const [, , height] = createTransformFromDefinition(OREGON, -23.333, US_SURVEY_FOOT).toWgs84(
+      POINT.x, POINT.y, POINT.z,
+    );
+
+    expect(height).toBeCloseTo(POINT.z * US_SURVEY_FOOT - 23.333, 9);
+  });
+
+  // A file that names no vertical system: the definition's unit, as before.
+  it('falls back to the definition\'s linear unit when given none', () => {
+    const [, , height] = createTransformFromDefinition(OREGON).toWgs84(POINT.x, POINT.y, POINT.z);
+
+    expect(height).toBeCloseTo(POINT.z * FOOT, 9);
   });
 });
 

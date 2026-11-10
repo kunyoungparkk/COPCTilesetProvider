@@ -10,6 +10,6 @@
  * makes "the builder drags no resolver with it" checkable; import it there.
  */
 export { geodeticToEcef } from './ecef.js';
-export { findVerticalEpsgCode } from './epsg-codes.js';
+export { findVerticalEpsgCode, findVerticalUnit } from './epsg-codes.js';
 export { resolveCrsDefinition } from './resolve.js';
 export type { CrsTransform } from './transform.js';

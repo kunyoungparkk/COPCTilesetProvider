@@ -42,6 +42,8 @@ export interface WorkerPoolOptions {
   readonly definition: string;
   /** Fixed for the pool's whole lifetime, like `definition`: it rides the one `init` message each slot gets. */
   readonly geoidHeight?: number;
+  /** Fixed for the pool's whole lifetime and carried on `init`, like `geoidHeight`. */
+  readonly metresPerVerticalUnit?: number;
   readonly budget: Budget;
   readonly size?: number;
 }
@@ -178,7 +180,7 @@ interface Waiter {
  * queue (see its own doc on `WorkerPool`).
  */
 export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
-  const { spawn, definition, geoidHeight, budget } = options;
+  const { spawn, definition, geoidHeight, metresPerVerticalUnit, budget } = options;
   const size = options.size ?? DEFAULT_POOL_SIZE;
 
   const slots: Slot[] = [];
@@ -241,7 +243,13 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     port.onError((error) => handlePortError(slot, error));
     try {
       port.post(
-        { kind: 'init', id: initId, definition, ...(geoidHeight !== undefined && { geoidHeight }) },
+        {
+          kind: 'init',
+          id: initId,
+          definition,
+          ...(geoidHeight !== undefined && { geoidHeight }),
+          ...(metresPerVerticalUnit !== undefined && { metresPerVerticalUnit }),
+        },
         [],
       );
     } catch (thrown) {

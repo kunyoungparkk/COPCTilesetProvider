@@ -37,6 +37,25 @@ minors could carry behaviour changes, as 0.2.0 did.
   Without `crs` the file is still refused with `WktNotInVlrsError`, whose
   message now gives the `crs` call to paste instead of saying the WKT is
   probably in an extended VLR. Its `code` and `url` are unchanged.
+- Heights are scaled by the unit the file's vertical system states. They were
+  scaled by the horizontal system's unit, so a file in metres across and feet
+  up had every height 3.28 times what it should be. The root tile of the
+  public autzen-2023, in metres across and US survey feet up, spanned 406 to
+  616 m of height; it now spans 124 to 188 m, where the same site's file in
+  feet both ways already was. A file that names no vertical system, or one
+  that states no unit, is scaled by the horizontal unit as before. `crs`
+  replaces the horizontal system only, so the file's vertical unit holds with
+  it too. A file in international feet across and US survey feet up, Autzen
+  among them, moves by two parts per million: under half a millimetre at
+  Autzen's greatest height.
+
+### Added
+
+- `metresPerVerticalUnit`, optional, on the `init` message of `ToWorker`. It
+  carries the unit of the fix above to the Worker, so that points and the
+  main thread's bounding volumes are scaled alike. A Worker that imports
+  `copc-tileset-provider/worker` reads it already; only a handler written by
+  hand against the protocol types has to forward it.
 
 ## [2.0.0] — 2026-11-08
 

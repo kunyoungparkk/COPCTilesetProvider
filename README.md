@@ -78,8 +78,14 @@ The definition for EPSG:5174 is at https://epsg.io/5174 […]
 ```
 
 `crs` takes a proj4 string or a WKT, and replaces the file's own description
-entirely. For an older datum it has to state the shift — in proj4, a
-`+towgs84=` term. Its accuracy is yours; this library applies what it is given.
+of its horizontal system entirely. For an older datum it has to state the
+shift — in proj4, a `+towgs84=` term. Its accuracy is yours; this library
+applies what it is given.
+
+Heights are scaled by the unit the file's vertical system states, which need
+not be the horizontal one: a file can be in metres across and feet up. Where
+the file states none, with or without `crs`, heights take the horizontal
+system's unit.
 
 A file whose description names no EPSG code is refused the same way, with
 `CrsCodeNotFoundError`, and so is a file that stores no description at all,

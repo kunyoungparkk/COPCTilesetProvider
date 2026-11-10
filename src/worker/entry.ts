@@ -35,7 +35,11 @@ export function createWorkerHandler(
   return async (message) => {
     if (message.kind === 'init') {
       try {
-        transform = createTransformFromDefinition(message.definition, message.geoidHeight);
+        transform = createTransformFromDefinition(
+          message.definition,
+          message.geoidHeight,
+          message.metresPerVerticalUnit,
+        );
         post({ kind: 'ready', id: message.id }, []);
       } catch (thrown) {
         post({ kind: 'failed', id: message.id, error: toWire(thrown) }, []);
