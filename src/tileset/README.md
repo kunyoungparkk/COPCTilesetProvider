@@ -2,7 +2,7 @@
 
 Maps the COPC octree onto a synthetic 3D Tiles document, plus the registry that resolves each content-bearing tile's opaque URI back to its byte range.
 
-`measureRootGeometricError(header, transform)` is the module's other export. Decision 6 asks for the root's *measured* metre span, which only the LAS header carries — `info.cube` is padded — so it is measured from the header once and passed back in as `TilesetContext.rootGeometricError`, the same value for every page of a file.
+`measureRootGeometricError(header, transform)` is the module's other export. Decision 6 asks for the root's *measured* metre span, which only the LAS header carries — `info.cube` is padded — so it is measured from the header once and passed back in as `TilesetContext.rootGeometricError`, the same value for every page of a file. The document's own top-level error is that span undivided: Cesium draws nothing of a tileset whose own error is within `maximumScreenSpaceError` on screen, so the root tile's error there would drop the whole file sixteen times too soon.
 
 `buildTileset` serves the file's root page and every sub-page alike, so a hierarchy tile expanding into an external tileset is another call rather than another code path. It is pure and synchronous: Blob URLs, codec installation and `Resource` interception belong to the provider, and the URI scheme is the caller's because the caller owns the interception.
 

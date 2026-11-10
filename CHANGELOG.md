@@ -12,6 +12,15 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ### Fixed
 
+- A file no longer disappears when the camera pulls back. The tileset's own
+  geometric error was the root tile's, a sixteenth of the file's span, and
+  Cesium draws nothing of a tileset whose own error is within
+  `maximumScreenSpaceError` on screen. Under the defaults the whole file, root
+  tile included, was gone while it was still up to 256 pixels across. The
+  tileset's error is now the span itself, so a file goes only once it is
+  smaller on screen than `maximumScreenSpaceError` pixels. In headless
+  Chromium at 1280×720, Autzen, 1.4 km across, had no tile left at a camera
+  range of 9 km; it now keeps its root tile out to 90 km.
 - A file that stores no WKT opens when `crs` is passed. `fromUrl` refused
   every such file with `WktNotInVlrsError` before it looked at `crs`: it took
   the header's count of extended VLRs as a sign that the WKT was stored

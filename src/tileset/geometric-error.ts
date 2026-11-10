@@ -64,6 +64,26 @@ export function measureRootGeometricError(
 }
 
 /**
+ * A tileset document's own geometric error: what drawing none of it loses,
+ * which is the span of what it describes.
+ *
+ * 3D Tiles gives a document an error apart from its root tile's, and Cesium
+ * acts on it: while that error, on screen, is within
+ * `maximumScreenSpaceError`, the traversal returns before it visits the root
+ * (`Cesium3DTilesetBaseTraversal.js`), and nothing of the file is drawn. A
+ * length's screen-space error is its own size in pixels, so with the span the
+ * file goes only once all of it is smaller on screen than the error the
+ * caller accepts. The root tile's error in its place would drop the file
+ * `ROOT_DIVISOR` times sooner: at 256 pixels across, under the defaults.
+ *
+ * Takes the root tile's error and undoes §7's divisor rather than measuring
+ * again, so the two cannot disagree about the span.
+ */
+export function tilesetGeometricError(rootTileGeometricError: number): number {
+  return rootTileGeometricError * ROOT_DIVISOR;
+}
+
+/**
  * A tile's geometric error: the root's, halved once per octree level.
  *
  * The depth is the key's absolute depth in the file, never its depth within

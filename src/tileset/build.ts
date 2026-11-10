@@ -1,7 +1,7 @@
 import type { Bounds, Las } from 'copc';
 import type { HierarchyPage, NodeKey } from '../copc/index.js';
 import type { CrsTransform } from '../crs/index.js';
-import { geometricErrorAtDepth } from './geometric-error.js';
+import { geometricErrorAtDepth, tilesetGeometricError } from './geometric-error.js';
 import type { Region } from './region.js';
 import { regionForKey } from './region.js';
 import type { TileEntry, TileNode } from './tree.js';
@@ -117,7 +117,14 @@ export function buildTileset(page: HierarchyPage, context: TilesetContext): Synt
   const root = tileFor(tree.root, true);
 
   return {
-    json: { asset: { version: '1.0' }, geometricError: root.geometricError, root },
+    json: {
+      asset: { version: '1.0' },
+      // Read by Cesium for the file's root page only. A sub-page's document
+      // is loaded as an external tileset, and `Cesium3DTileset.loadTileset`
+      // takes nothing from one but its `root`.
+      geometricError: tilesetGeometricError(root.geometricError),
+      root,
+    },
     entries,
     synthesizedAncestors: tree.synthesizedAncestors,
   };
