@@ -1,5 +1,5 @@
 import { Las } from 'copc';
-import { NotCopcError, WktNotInVlrsError } from '../errors/index.js';
+import { NotCopcError } from '../errors/index.js';
 import type { RangeReader } from '../range/index.js';
 
 const WKT_USER_ID = 'LASF_Projection';
@@ -12,6 +12,13 @@ const WKT_RECORD_ID = 2112;
  * only the EPSG code and looks it up, because handing whole WKT to proj4 goes
  * quietly wrong on compound systems and dialects. Interpreting this belongs to
  * the CRS module.
+ *
+ * `undefined` means no WKT record among the VLRs, and nothing more. Whether
+ * that is a failure is not decided here: a caller's `crs` opens such a file
+ * (Decision 6), and only `fromUrl` knows whether one was passed. A WKT stored
+ * as an extended VLR is not looked for. The header's count of extended VLRs
+ * cannot stand in for looking, because every COPC file has at least one, its
+ * hierarchy.
  */
 export async function readWkt(
   reader: RangeReader,
@@ -21,7 +28,7 @@ export async function readWkt(
   const offset = header.headerLength;
   const length = header.pointDataOffset - offset;
   if (length <= 0) {
-    return absentWkt(reader, header);
+    return undefined;
   }
 
   const { bytes } = await reader.read({ offset, length }, signal);
@@ -29,7 +36,7 @@ export async function readWkt(
 
   // `walk` wants a getter; give it one over bytes already in hand so it makes
   // no requests of its own. evlrCount is zeroed because extended records live
-  // near EOF, outside this region — absentWkt handles that case.
+  // near EOF, outside this region.
   const get = (begin: number, end: number): Promise<Uint8Array> =>
     Promise.resolve(region.subarray(begin - offset, end - offset));
 
@@ -53,7 +60,7 @@ export async function readWkt(
 
   const record = Las.Vlr.find(vlrs, WKT_USER_ID, WKT_RECORD_ID);
   if (record === undefined) {
-    return absentWkt(reader, header);
+    return undefined;
   }
 
   const start = record.contentOffset - offset;
@@ -71,22 +78,8 @@ export async function readWkt(
   const text = new TextDecoder().decode(region.subarray(start, end));
 
   // LAS 1.4 calls for null termination, and writers pad past it. A record that
-  // trims away to nothing is a missing record, so it takes the same route as one
-  // that was never written — absentWkt, not a bare undefined.
+  // trims away to nothing is a missing record, so it gets the same answer as
+  // one that was never written.
   const trimmed = text.replace(/\0+$/, '');
-  return trimmed === '' ? absentWkt(reader, header) : trimmed;
-}
-
-/**
- * Decides what "no WKT in the VLR region" means for this file.
- *
- * An extended VLR could hold one, and this module does not read that region.
- * Returning undefined there would surface later as a confusing CRS failure
- * about a file that does declare a coordinate system.
- */
-function absentWkt(reader: RangeReader, header: Las.Header): undefined {
-  if (header.evlrCount > 0) {
-    throw new WktNotInVlrsError(reader.url);
-  }
-  return undefined;
+  return trimmed === '' ? undefined : trimmed;
 }

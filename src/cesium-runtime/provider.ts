@@ -7,7 +7,11 @@ import { openCopc } from '../copc/index.js';
 import { findVerticalEpsgCode, resolveCrsDefinition } from '../crs/index.js';
 import type { CrsTransform } from '../crs/index.js';
 import { createTransformFromDefinition } from '../crs/worker.js';
-import { InvalidSourceUrlError, InvalidTokenBaseError } from '../errors/index.js';
+import {
+  InvalidSourceUrlError,
+  InvalidTokenBaseError,
+  WktNotInVlrsError,
+} from '../errors/index.js';
 import { createCoalescingReader, createRangeReader } from '../range/index.js';
 import type { RangeReader, RangeStats } from '../range/index.js';
 import { buildTileset, measureRootGeometricError } from '../tileset/index.js';
@@ -91,8 +95,9 @@ export interface COPCTilesetProviderOptions {
    * WKT. It refuses where that is not enough to place the points without a
    * guess, and names this option in the error: a datum that needs a shift
    * the file does not state (`CrsDefinitionRequiredError`), a WKT proj4
-   * cannot read (the same error), or no readable EPSG code at all
-   * (`CrsCodeNotFoundError`). For a datum shift, the definition has to state
+   * cannot read (the same error), no readable EPSG code at all
+   * (`CrsCodeNotFoundError`), or no WKT among the file's VLRs
+   * (`WktNotInVlrsError`). For a datum shift, the definition has to state
    * it — in proj4, a `+towgs84=` term. Its accuracy is the caller's to vouch
    * for; this library applies what it is given.
    */
@@ -228,6 +233,20 @@ function measureExtent(
 }
 
 /**
+ * The definition the file's own WKT gives, for a caller who passed no `crs`.
+ *
+ * A file with no WKT is refused here rather than where the WKT is read
+ * (`src/copc/wkt.ts`): it is a failure only when nothing else names the
+ * system, and whether a `crs` did is known to `fromUrl` alone.
+ */
+function resolveFileCrs(wkt: string | undefined, url: string): string {
+  if (wkt === undefined) {
+    throw new WktNotInVlrsError(url);
+  }
+  return resolveCrsDefinition(wkt);
+}
+
+/**
  * Says so, once, when a file measures height from a geoid and the caller gave
  * nothing to correct it with.
  *
@@ -327,10 +346,10 @@ export class COPCTilesetProvider {
    * The order follows OVERVIEW §4 and Decision 2: a reader and a budget; the
    * three requests `openCopc` needs; the file's coordinate system, resolved
    * here on the main thread because its failures (`CrsCodeNotFoundError`,
-   * `CrsDefinitionRequiredError`) have to reject this call rather than
-   * surface inside a Worker as an opaque `messageerror`; the root geometric
-   * error and a fresh `tokenBase`; the synthetic tileset document and its
-   * registry; a Blob URL for that
+   * `CrsDefinitionRequiredError`, `WktNotInVlrsError`) have to reject this
+   * call rather than surface inside a Worker as an opaque `messageerror`; the
+   * root geometric error and a fresh `tokenBase`; the synthetic tileset
+   * document and its registry; a Blob URL for that
    * document, fetched through a `ScheduledRangeResource` so Cesium's own
    * `getDerivedResource`/`clone` keep every tile's content resource inside
    * this class rather than downgrading to a plain `Resource` (see that
@@ -372,7 +391,7 @@ export class COPCTilesetProvider {
 
     // A caller's `crs` replaces the file's own description outright, so a file
     // whose WKT would be refused, or that has none, still opens with it.
-    const definition = options.crs ?? resolveCrsDefinition(file.wkt);
+    const definition = options.crs ?? resolveFileCrs(file.wkt, url);
     const transform = createTransformFromDefinition(definition, options.geoidHeight);
 
     warnIfHeightsAreUncorrected(file.wkt, options.geoidHeight, file.header, transform);

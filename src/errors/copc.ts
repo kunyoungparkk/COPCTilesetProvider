@@ -96,17 +96,28 @@ export class UnsupportedPointFormatError extends CopcTilesetError {
   }
 }
 
-/** The WKT record is missing from the VLR region, and may be in an EVLR. */
+/**
+ * The file has no WKT record among its VLRs, and the caller passed no `crs`,
+ * so nothing says which coordinate system its points are in.
+ *
+ * Either the file declares no system at all, or it stores its WKT as an
+ * extended VLR, which this library does not read. The two are not told apart:
+ * a `crs` from the caller opens the file in both cases (Decision 6).
+ */
 export class WktNotInVlrsError extends CopcTilesetError {
   readonly code = 'wkt-not-in-vlrs';
   readonly url: string;
 
   constructor(url: string) {
     super(
-      `${url} has no WKT record among its VLRs, but does declare extended VLRs, so its ` +
-        'coordinate system is probably stored there. This library reads WKT from the VLR ' +
-        'region only. Re-save the file with the WKT as a regular VLR — `pdal translate` ' +
-        'does this by default — or open an issue if extended VLRs matter for your data.',
+      `${url} has no WKT record among its VLRs, so nothing this library reads says ` +
+        'which coordinate system its points are in. If you know the system, pass its ' +
+        'definition when opening the file:\n\n' +
+        "    COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });\n\n" +
+        'Or re-write the file with a current PDAL — ' +
+        '`pdal translate input.copc.laz output.copc.laz --writers.copc.a_srs=EPSG:<code>` ' +
+        '— so it records the system as a regular VLR. A WKT stored only as an extended ' +
+        'VLR is not read; `pdal translate` without `a_srs` moves one to a regular VLR.',
     );
     this.url = url;
   }

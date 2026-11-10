@@ -82,7 +82,8 @@ entirely. For an older datum it has to state the shift — in proj4, a
 `+towgs84=` term. Its accuracy is yours; this library applies what it is given.
 
 A file whose description names no EPSG code is refused the same way, with
-`CrsCodeNotFoundError`; `crs` opens it too.
+`CrsCodeNotFoundError`, and so is a file that stores no description at all,
+with `WktNotInVlrsError`; `crs` opens both.
 
 ## Your server has to support Range requests
 

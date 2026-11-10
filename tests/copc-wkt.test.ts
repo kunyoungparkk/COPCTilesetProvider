@@ -44,7 +44,6 @@ function wktRegion(content: Uint8Array): { region: Uint8Array; header: Las.Heade
   const header: Las.Header = {
     ...HEADER,
     vlrCount: 1,
-    evlrCount: 0,
     pointDataOffset: HEADER.headerLength + region.length,
   };
   return { region, header };
@@ -72,27 +71,22 @@ describe('readWkt', () => {
     expect(wkt).not.toMatch(/\0/);
   });
 
-  it('returns undefined when the file has no WKT and no extended VLRs', async () => {
-    const header = { ...HEADER, vlrCount: 0, evlrCount: 0, pointDataOffset: 375 };
+  // Every header below keeps Autzen's own evlrCount of 1. Each COPC file has
+  // at least that one extended VLR, its hierarchy, so the count says nothing
+  // about where a WKT might be: answering anything but undefined here makes
+  // every file without a WKT unopenable, `crs` or not.
+  it('returns undefined when the VLR region is empty', async () => {
+    const header = { ...HEADER, vlrCount: 0, pointDataOffset: 375 };
     const { reader } = vlrReader(new Uint8Array(0), header);
 
     expect(await readWkt(reader, header)).toBeUndefined();
-  });
-
-  // Silently reporting "no CRS" for a file that has one, stored somewhere we do
-  // not look, would surface later as a confusing CRS failure.
-  it('says so when the WKT might be in an extended VLR', async () => {
-    const header = { ...HEADER, vlrCount: 0, evlrCount: 1, pointDataOffset: 375 };
-    const { reader } = vlrReader(new Uint8Array(0), header);
-
-    await expect(readWkt(reader, header)).rejects.toMatchObject({ code: 'wkt-not-in-vlrs' });
   });
 
   // The real reader rejects a zero-length range as a caller bug
   // (InvalidByteRangeError), so the case above reaches its answer only because
   // no request goes out at all.
   it('asks for nothing when the VLR region is empty', async () => {
-    const header = { ...HEADER, vlrCount: 0, evlrCount: 0, pointDataOffset: 375 };
+    const header = { ...HEADER, vlrCount: 0, pointDataOffset: 375 };
     const { reader, reads } = vlrReader(new Uint8Array(0), header);
 
     await readWkt(reader, header);
@@ -114,43 +108,14 @@ describe('readWkt', () => {
     expect(await readWkt(reader, header)).toBeUndefined();
   });
 
-  // The file shape WktNotInVlrsError's own message describes: VLRs present,
-  // none of them the WKT record. Without this the absent-record route can
-  // return a bare undefined and ship green.
-  it('says so when VLRs are present but none of them is the WKT record', async () => {
-    const region = VLRS.slice(0, WKT_RECORD_START);
-    const header: Las.Header = {
-      ...HEADER,
-      vlrCount: 2,
-      evlrCount: 1,
-      pointDataOffset: HEADER.headerLength + region.length,
-    };
-    const { reader } = vlrReader(region, header);
-
-    await expect(readWkt(reader, header)).rejects.toMatchObject({ code: 'wkt-not-in-vlrs' });
-  });
-
-  // A record that trims to nothing is a missing record, so the same judgement
-  // has to apply: the real one could be in an extended VLR. Answering undefined
-  // here is the silent "no CRS" absentWkt exists to prevent.
-  it('says so when an all-padding record sits beside extended VLRs', async () => {
-    const { region, header } = wktRegion(new Uint8Array(4));
-    const withEvlrs: Las.Header = { ...header, evlrCount: 1 };
-    const { reader } = vlrReader(region, withEvlrs);
-
-    await expect(readWkt(reader, withEvlrs)).rejects.toMatchObject({ code: 'wkt-not-in-vlrs' });
-  });
-
-  // The counterpart of the case above: the same absent record, but nothing
-  // suggesting the WKT is elsewhere, so undefined is the honest answer. The
-  // empty-region case reaches undefined by the early return instead, which
-  // leaves this branch of the record lookup unvisited.
+  // The shape of a real file that declares no coordinate system (measured:
+  // denver-airport-2018 in the public hobu-lidar bucket): the info and laszip
+  // records, no WKT record, and the hierarchy as the one extended VLR.
   it('returns undefined when the VLRs it walks include no WKT record', async () => {
     const region = VLRS.slice(0, WKT_RECORD_START);
     const header: Las.Header = {
       ...HEADER,
       vlrCount: 2,
-      evlrCount: 0,
       pointDataOffset: HEADER.headerLength + region.length,
     };
     const { reader } = vlrReader(region, header);

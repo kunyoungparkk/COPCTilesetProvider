@@ -404,17 +404,19 @@ describe('UnknownTileRequestError', () => {
 });
 
 describe('WktNotInVlrsError', () => {
-  it('says where the WKT probably is and how to move it', () => {
-    const error = new WktNotInVlrsError('https://host/evlr.copc.laz');
+  it('names the file and offers the crs call and a re-write', () => {
+    const error = new WktNotInVlrsError('https://host/no-wkt.copc.laz');
 
     expect(error.code).toBe('wkt-not-in-vlrs');
     expect(error.name).toBe('WktNotInVlrsError');
-    expect(error.url).toBe('https://host/evlr.copc.laz');
-    expect(error.message).toContain('https://host/evlr.copc.laz');
-    expect(error.message).toContain('extended VLR');
-    // Two ways forward, and the message has to offer both.
+    expect(error.url).toBe('https://host/no-wkt.copc.laz');
+    expect(error.message).toContain('https://host/no-wkt.copc.laz');
+    // Two ways forward, and the message has to offer both (Decision 6).
+    expect(error.message).toContain("COPCTilesetProvider.fromUrl(url, { crs: '<proj4 definition>' });");
     expect(error.message).toContain('pdal translate');
-    expect(error.message).toContain('open an issue');
+    // The one case re-writing fixes without knowing the system: a WKT the file
+    // does hold, in the region this library does not read.
+    expect(error.message).toContain('extended VLR');
   });
 });
 

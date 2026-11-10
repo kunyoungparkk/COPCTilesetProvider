@@ -10,6 +10,16 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+### Fixed
+
+- A file that stores no WKT opens when `crs` is passed. `fromUrl` refused
+  every such file with `WktNotInVlrsError` before it looked at `crs`: it took
+  the header's count of extended VLRs as a sign that the WKT was stored
+  there, and every COPC file has at least one extended VLR, its hierarchy.
+  Without `crs` the file is still refused with `WktNotInVlrsError`, whose
+  message now gives the `crs` call to paste instead of saying the WKT is
+  probably in an extended VLR. Its `code` and `url` are unchanged.
+
 ## [2.0.0] — 2026-11-08
 
 The coordinate system is read from the file. `registerCrs` is gone: most files
