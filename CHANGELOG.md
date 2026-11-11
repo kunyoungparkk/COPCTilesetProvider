@@ -10,6 +10,14 @@ minors could carry behaviour changes, as 0.2.0 did.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-11-11
+
+Four fixes found by opening real public files with 2.0.0: a file that vanished
+when the camera pulled back, 8-bit colour that rendered black, a file with no
+WKT that `crs` could not open, and heights scaled by the wrong unit. The last
+one adds an optional field to the `ToWorker` protocol type, hence the minor
+version. The Cesium peer range is still `>=1.142.0 <1.148.0`.
+
 ### Fixed
 
 - A file no longer disappears when the camera pulls back. The tileset's own
@@ -450,7 +458,8 @@ COPC file into CesiumJS with no pre-tiling step: verified HTTP Range reads,
 LAZ decode and coordinate transform in a Worker pool, and a synthetic 3D Tiles
 document that hands traversal, caching, styling and picking to Cesium itself.
 
-[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kunyoungparkk/COPCTilesetProvider/compare/v1.0.1...v1.1.0
